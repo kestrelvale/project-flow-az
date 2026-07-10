@@ -25,9 +25,9 @@ description: 用一套基于文件的多 Agent 协作流程来初始化和管理
 2. **先列清单等确认**:把"将创建 / 修改的文件"列给用户,确认后再动手。
 3. **铺目录**:建 `flow/`(`charter.md` `plan.md` `进展.md` `decisions.md` `踩坑记录.md` `tasks/`)+ `docs/`,内容从 `assets/templates/` 复制。**代码项目**另建 `scripts/`(或 `src/`)放代码。
 4. **入口**:用 `assets/templates/AGENTS.md` 生成项目 `AGENTS.md`(替换 `<项目名>`;已有 AGENTS.md 则**合并**精要规则进去);`ln -s AGENTS.md CLAUDE.md`(Windows 改复制);可选 `DESIGN.md`(仅当项目有设计 / 创意工作)。
-5. **装 hook**:复制 `assets/templates/.hooks/`、`.claude/`、`.codex/` 到项目;`chmod +x .hooks/stop-doccheck.sh`;检测 Codex `features.hooks` 是否有效(当前默认 true,若被关才提醒用户开 `~/.codex/config.toml` 或 `--enable hooks`)——**不擅自改全局 config**;提醒 Codex 项目需 trust 且 `/hooks` 批准。详见 `references/hook机制.md`。
+5. **装 hook**:复制 `assets/templates/.hooks/`、`.claude/`、`.codex/` 到项目;`chmod +x .hooks/stop-doccheck.sh`;检测 Codex `features.hooks` 是否有效(当前默认 true,若被关才提醒用户开 `~/.codex/config.toml` 或 `--enable hooks`)——**不擅自改全局 config**;提醒 Codex 项目需 trust 且 `/hooks` 批准。Codex 路径当前默认安全放行、不自动续跑;兼容问题已在 CLI 0.144.1 实证,恢复条件见 `references/hook机制.md`。
 6. **详规随项目**:把 `references/` 下 5 份详规复制到项目 `flow/规范/`(自包含)。
-7. **跑接入自检**:逐项核对 `references/初始化SOP.md` 末尾清单(软链是否解析正确、hook 是否输出合法 JSON、目录是否齐),把结果报告给用户。
+7. **跑接入自检**:先运行 `bash tests/test-stop-hook.sh`,再逐项核对 `references/初始化SOP.md` 末尾清单(软链是否解析正确、hook 是否输出合法 JSON、目录是否齐),把结果报告给用户。
 8. **收尾**:引导用户开始填 `flow/charter.md`。
 
 幂等:可重复跑,不产生重复或破坏(也是更新老项目详规副本的方式)。

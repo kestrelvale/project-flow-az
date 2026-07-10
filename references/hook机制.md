@@ -1,6 +1,6 @@
 # Hook 机制(收工自检)
 
-> 每个回合收尾的 Stop hook,用一次自动续跑做**收工自检**:① 文档要不要更新(按 `文档维护SOP.md` / `DESIGN维护SOP.md`)② 在 `flow/进展.md` 追加一条进展(交接棒)。
+> Claude Code 每个回合收尾的 Stop hook,用一次自动续跑做**收工自检**:① 文档要不要更新(按 `文档维护SOP.md` / `DESIGN维护SOP.md`)② 在 `flow/进展.md` 追加一条进展(交接棒)。Codex 当前默认安全放行,不创建自动续跑消息;相关兼容问题已在 CLI 0.144.1 实证。
 > 这是文档不漂移的**兜底**——没 hook 也要自觉,有 hook 多一层保险。
 
 ---
@@ -24,6 +24,16 @@
 tool="${1:-claude}"
 slug="$(basename "$PWD" | tr -c '[:alnum:]_.-' '_')"
 input="$(cat)"
+
+# Codex CLI 0.144.1 已实证会把 decision:block 产生的 continuation prompt
+# 保存为裸 UUID message id；下一次 Responses API 请求因此触发
+# invalid_id_prefix。AGENTS.md 已包含同一套收工约束，所以在完成
+# “停止→续发→重启恢复”回归前，Codex 默认安全放行、不自动续跑。
+if [ "$tool" = "codex" ]; then
+  printf '%s\n' '{"continue":true}'
+  exit 0
+fi
+
 sid="$(printf '%s' "$input" | jq -r '.session_id // "nosid"' 2>/dev/null || echo nosid)"
 turn="$(printf '%s' "$input" | jq -r '.turn_id // empty' 2>/dev/null || true)"
 active="$(printf '%s' "$input" | jq -r '.stop_hook_active // false' 2>/dev/null || echo false)"
@@ -43,7 +53,8 @@ jq -n --arg r "$reason" '{decision:"block", reason:$r}'
 ```
 
 要点:
-- **统一输出**:首次 `{"decision":"block",...}` 会让 Stop hook 续跑一次自检;之后 `{"continue":true}` 放行。Codex 里 `decision:block` 不是拒绝本轮,而是自动创建一条 continuation prompt。
+- **当前分流**:Claude Code 首次返回 `{"decision":"block",...}` 续跑一次自检,之后返回 `{"continue":true}`;Codex 直接返回 `{"continue":true}`。Codex 的收工约束由 `AGENTS.md` 保证。
+- **兼容原因**:已在 Codex CLI 0.144.1 实证:`decision:block` continuation prompt 会落成裸 UUID message id,恢复或继续任务时被 Responses API 以 `invalid_id_prefix` 拒绝。其他或后续版本也保持安全放行,直到完整回归证明可恢复。
 - **防循环**:优先看 `stop_hook_active`;再用 `/tmp` 下的 `turn_id`(没有则 `session_id`) marker 兜底。
 - **reason 用 `jq -n` 生成**:中文 + 引号不用手动转义。
 - 改这段 5 问清单,只改脚本一处,两端同步。
@@ -64,7 +75,21 @@ jq -n --arg r "$reason" '{decision:"block", reason:$r}'
 ## Codex 侧注意
 - Codex 当前 `features.hooks` 默认 true;若用户显式关了,提醒在 `~/.codex/config.toml` 加 `[features]\nhooks = true` 或用 `--enable hooks`。
 - 项目级 `.codex/hooks.json` 只有在项目被 Codex trust 后加载;首次添加 / 改动后需在 Codex TUI 输入 `/hooks` **审核批准**。批准绑定当前 `trusted_hash`,改了 `command` 要重新批准。**逻辑放在脚本里,以后改脚本不触发重批**(command 没变)。
-- Codex `Stop` hook 返回 `decision:block` 会让 Codex 继续一轮并把 `reason` 当作续跑提示;因此脚本必须在续跑时返回 `{"continue":true}` 防止循环。
+- 当前不要让 Codex `Stop` hook 返回 `decision:block`;否则自动 continuation prompt 可能污染 rollout 历史。Claude Code 路径仍保留一次续跑与 marker 防循环。
+
+## 回归验证与恢复条件
+
+技能源码先运行:
+
+```bash
+bash tests/test-stop-hook.sh
+```
+
+该测试确定性验证 Codex 首次/续跑都只放行,以及 Claude Code 首次 block、续跑放行。它不能替代客户端端到端验证。未来只有同时通过下面三步,才考虑恢复 Codex 自动续跑:
+
+1. 结束一次任务,确认 Stop hook 自动提示没有写入裸 UUID message id。
+2. 在同一任务继续发送消息,确认 Responses API 不再报 `invalid_id_prefix`。
+3. 完全退出并重启 Codex,恢复该任务后再次发送消息成功。
 
 ## 安装
 由 `初始化SOP.md` 执行:复制脚本 → `chmod +x .hooks/stop-doccheck.sh` → 写两端配置 → 检测 Codex `features.hooks` 有效状态(若被关再提醒开启,不擅自改全局 config)→ 提醒 trust 项目与 `/hooks` 批准。

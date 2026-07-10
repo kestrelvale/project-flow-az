@@ -121,6 +121,7 @@ skill 会在 `flow/进展.md` 顶部追加一条记录，字段包括：
 | `references/DESIGN维护SOP.md` | `DESIGN.md` 怎么维护 |
 | `references/hook机制.md` | 收工自检 hook 的机制与安装说明 |
 | `assets/templates/` | 注入项目的模板文件 |
+| `tests/test-stop-hook.sh` | 验证 Codex 安全放行与 Claude Code 单次续跑分流 |
 | `visual-guide.html` | 可视化说明页 |
 
 ## 方法论要点
@@ -128,7 +129,7 @@ skill 会在 `flow/进展.md` 顶部追加一条记录，字段包括：
 - **目录归属**：协调 / 推进项目的内容进 `flow/`；交付物本身进 `docs/`、`scripts/` 或 `src/`。
 - **进展日志**：`flow/进展.md` 是接力棒，新的记录放最上面，顶部那条就是当前 handoff。
 - **运行时合同**：根级 `AGENTS.md` 是两个工具共读的规则入口，`CLAUDE.md` 软链到它。
-- **文档不漂移**：Stop hook 在收工时提醒是否要更新文档、写进展、落决策或记踩坑。
+- **文档不漂移**：`AGENTS.md` 固化收工约束；Stop hook 在 Claude Code 端自动续跑提醒。Codex 端当前默认安全放行，以规避已在 CLI 0.144.1 实证的自动续跑消息 ID 兼容问题，详见 `references/hook机制.md`。
 - **非破坏接入**：已有项目只补缺失内容，遇到冲突先列清单请用户确认。
 
 ## 更新旧项目

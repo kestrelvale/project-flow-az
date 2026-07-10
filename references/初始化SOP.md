@@ -35,7 +35,7 @@
 - [ ] `AGENTS.md` 存在;读 `CLAUDE.md` = `AGENTS.md`(软链解析正确)
 - [ ] AGENTS.md 里有:目录地图 + 开工/收工 + 核心约束 + 详规指针
 - [ ] (若有设计工作)`DESIGN.md` 存在
-- [ ] `.hooks/stop-doccheck.sh` 可执行:首次 `printf '%s' '{"session_id":"t","turn_id":"t1","stop_hook_active":false}' | bash .hooks/stop-doccheck.sh codex` 输出 `decision:block`;续跑 `printf '%s' '{"session_id":"t","turn_id":"t1","stop_hook_active":true}' | bash .hooks/stop-doccheck.sh codex` 输出 `continue:true`
+- [ ] 先运行 `bash tests/test-stop-hook.sh`;再确认 `.hooks/stop-doccheck.sh` 可执行:Codex 首次与续跑都输出 `continue:true`;Claude 首次输出 `decision:block`,续跑输出 `continue:true`。该分流规避已在 Codex CLI 0.144.1 实证的自动 continuation prompt 裸 UUID message id 问题。
 - [ ] `.claude/settings.json`、`.codex/hooks.json` 已写
 - [ ] Codex 项目已 trust;`features.hooks` 未被关闭;`/hooks` 已批准
 - [ ] `flow/规范/` 下 5 份详规齐

@@ -1,9 +1,19 @@
 #!/usr/bin/env bash
-# Stop hook —— 每个回合收尾触发一次续跑,提示按文档维护 SOP 自检。
+# Stop hook —— Claude 每回合收尾续跑一次自检;Codex 暂时只放行。
 # 用法: stop-doccheck.sh [claude|codex]
 tool="${1:-claude}"
 slug="$(basename "$PWD" | tr -c '[:alnum:]_.-' '_')"
 input="$(cat)"
+
+# Codex CLI 0.144.1 已实证会把 decision:block 产生的 continuation prompt
+# 保存为裸 UUID message id；下一次 Responses API 请求因此触发
+# invalid_id_prefix。AGENTS.md 已包含同一套收工约束，所以在完成
+# “停止→续发→重启恢复”回归前，Codex 默认安全放行、不自动续跑。
+if [ "$tool" = "codex" ]; then
+  printf '%s\n' '{"continue":true}'
+  exit 0
+fi
+
 sid="$(printf '%s' "$input" | jq -r '.session_id // "nosid"' 2>/dev/null || echo nosid)"
 turn="$(printf '%s' "$input" | jq -r '.turn_id // empty' 2>/dev/null || true)"
 active="$(printf '%s' "$input" | jq -r '.stop_hook_active // false' 2>/dev/null || echo false)"
