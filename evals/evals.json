@@ -1,0 +1,43 @@
+{
+  "skill_name": "project-flow-cy",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "我有一个单仓产品，根目录只有一个 .git 和 pnpm-workspace.yaml，下面是 apps/frontend、services/backend、apps/landing，三者共同发布。请用 project-flow-cy 接入协作流程。先给我项目边界判断、建议目录树和将创建/修改清单，这一步不要实际改文件。",
+      "expected_output": "把整个仓库识别为一个总体项目边界，只提出一套根级 flow/docs/hook；为三个有独立职责的子项目提出局部 AGENTS.md 与 CLAUDE.md；说明跨模块文档集中在根级 docs，不在子项目重复建立控制层，并等待确认。",
+      "files": [],
+      "expectations": [
+        "明确把整个仓库判断为一个单仓多子项目，而不是三个独立项目",
+        "目录树中只有根级一套 flow/、docs/、.hooks/、.claude/ 和 .codex/",
+        "frontend、backend、landing 各自有局部 AGENTS.md 和同源 CLAUDE.md",
+        "产品、架构和跨模块契约集中在根级 docs/，代码留在对应子项目",
+        "列出将创建或修改的文件并在实际写入前等待用户确认"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "一个产品由 web、api、marketing-site 三个目录组成，但每个目录里都有自己的 .git、独立 CI、独立版本和发布时间。我想用这套 flow/docs 管理，应该怎么接入？请给出结构决策，不要创建文件。",
+      "expected_output": "识别为三个独立项目边界，每个仓库各有完整协作骨架；如需总体协调，可另设只管理跨仓目标、契约和集成交接的总控仓库，不能把三个仓库强行合成一套内部任务流。",
+      "files": [],
+      "expectations": [
+        "依据嵌套 .git、独立 CI、版本和发布把三个目录识别为独立项目边界",
+        "说明每个独立仓库需要自己的根级 flow/、docs/、规则入口和 hook",
+        "把上层总控仓库描述为可选，并限定它只管理跨仓协调",
+        "没有建议在一个仓库内部重复嵌套其他仓库的总体控制层"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "这是一个已有 monorepo：frontend/README.md 和 frontend/docs/ 是现有工具链需要的，backend/CLAUDE.md 也已经写了很多规则；根目录还没有 flow/。请用 project-flow-cy 说明非破坏接入方案，重点说哪些文件会保留、冲突怎么处理。先不要执行。",
+      "expected_output": "保留已有 README 和局部 docs，只在根级 docs/README.md 建索引；不覆盖 backend/CLAUDE.md，先检查能否与局部 AGENTS.md 合并或建链，不能安全处理则列冲突；根级只创建一套 flow/docs/hook，并等待确认。",
+      "files": [],
+      "expectations": [
+        "明确保留 frontend/README.md 和 frontend/docs/，不迁移、不删除",
+        "建议从根级 docs/README.md 索引保留在子项目里的文档",
+        "不会覆盖 backend/CLAUDE.md；无法安全合并或建软链时列为冲突项",
+        "只提出一套根级 flow/、docs/ 和 hook，不在子项目重复创建",
+        "实际写入前先展示非破坏合并清单并等待确认"
+      ]
+    }
+  ]
+}

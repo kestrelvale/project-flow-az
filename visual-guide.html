@@ -1170,8 +1170,8 @@
             <span>目标、计划、进展、决策、踩坑</span>
           </div>
           <div class="file-card">
-            <b>docs/ · src/</b>
-            <span>方案、调研、交付物、代码</span>
+            <b>docs/ · 子项目代码</b>
+            <span>文档集中，代码按模块归位</span>
           </div>
           <div class="file-card">
             <b>AGENTS.md · CLAUDE.md</b>
@@ -1240,7 +1240,7 @@
         <article class="benefit-card">
           <div class="benefit-icon"><div class="handoff-icon"><span></span></div></div>
           <h3>协作不乱</h3>
-          <p>`flow/` 管推进，`docs/` 和 `src/` 管产物。每个东西都有家。</p>
+          <p>根级 `flow/` 管推进，根级 `docs/` 集中文档，代码留在对应子项目。每个东西都有家。</p>
         </article>
       </div>
     </section>
@@ -1256,7 +1256,7 @@
       <div class="actions">
         <article class="action-card">
           <h3>A. 接入项目</h3>
-          <p>把当前文件夹改造成一个有协作规则的项目。已有项目也不会粗暴覆盖，而是缺啥补啥。</p>
+          <p>先判断单体、单仓多子项目或独立仓库，再为每个项目边界建立协作骨架。已有项目缺啥补啥。</p>
           <div class="action-visual">
             <div class="folder-box">
               <div class="folder-icon"></div>
@@ -1273,7 +1273,7 @@
           </div>
           <details>
             <summary>接入时具体做什么</summary>
-            <p>先判断项目状态，列出将创建或修改的文件，等确认后再动手。然后铺目录、生成入口文档、安装收工自检 hook、复制 5 份详规，最后跑自检。</p>
+            <p>先判断项目边界和状态，列出将创建或修改的文件，等确认后再动手。单仓只铺一套根级控制层，各子项目只补局部入口；随后安装收工自检 hook、复制 6 份详规并跑自检。</p>
           </details>
         </article>
 
@@ -1358,8 +1358,8 @@
           <h3>它怎么响</h3>
           <div class="hook-visual">
             <div class="hook-step"><i>1</i><span>Agent 准备停止时，Stop hook 触发。</span></div>
-            <div class="hook-step"><i>2</i><span>脚本返回提醒：要不要更新文档？要不要写进展？</span></div>
-            <div class="hook-step"><i>3</i><span>Agent 自检一轮后再次停止，脚本放行，避免循环。</span></div>
+            <div class="hook-step"><i>2</i><span>Claude Code 返回一次收工提醒；Codex 当前走安全放行。</span></div>
+            <div class="hook-step"><i>3</i><span>Claude Code 自检后再次停止，脚本放行，避免循环。</span></div>
           </div>
         </article>
         <article class="hook-panel">
@@ -1368,7 +1368,7 @@
           <code class="code-path">ln -s /Users/cychenyue/Documents/cc-skills/project-flow-cy ~/.agents/skills/project-flow-cy</code>
           <details>
             <summary>给懂工具的人看的细节</summary>
-            <p>Codex 当前 `features.hooks` 默认开启。项目级 `.codex/hooks.json` 只有在项目被 trust 后加载。Stop hook 首次返回 `decision:block`，续跑时返回 `continue:true`。</p>
+            <p>Codex 当前 `features.hooks` 默认开启。项目级 `.codex/hooks.json` 只有在项目被 trust 后加载。Codex 路径当前始终返回 `continue:true`；Claude Code 首次返回 `decision:block`，续跑时返回 `continue:true`。</p>
           </details>
         </article>
       </div>
@@ -1389,18 +1389,18 @@
         avoid: "不要把最终方案、调研正文或代码塞进 flow/。",
         example: "charter.md · plan.md · 进展.md · decisions.md · 踩坑记录.md · tasks/"
       },
-      "docs/ · src/": {
+      "docs/ · module/": {
         tag: "内容层",
         title: "项目做出什么",
-        text: "调研、方案、交付物、代码和说明放这里。进展日志只给路径，真正内容回到这里看。",
-        use: "做方案就写 docs/specs/，写代码就进 src/ 或 scripts/。",
-        avoid: "不要把交接卡和任务推进记录放进 docs/。",
-        example: "docs/specs/xxx.md · docs/reviews/xxx.md · src/ · scripts/"
+        text: "产品、架构、跨模块契约和统一说明集中在根级 docs/；代码、测试和构建配置留在对应子项目。进展日志只给真实路径。",
+        use: "做方案就写根级 docs/，写代码就进 frontend/、backend/ 等对应目录。",
+        avoid: "不要在每个子项目重复建立 flow/ 和完整 docs/。",
+        example: "docs/contracts/api.md · docs/modules/frontend/ · frontend/src/ · backend/src/"
       },
       "AGENTS.md / CLAUDE.md": {
         tag: "入口合同",
         title: "两个工具读同一份规则",
-        text: "这里放精要规则、目录地图、开工/收工约定和详规指针。CLAUDE.md 软链到 AGENTS.md。",
+        text: "根级入口放总体规则，子项目入口只补局部职责和命令；同目录 CLAUDE.md 都软链到 AGENTS.md。",
         use: "新会话自动或主动读取，确保 Claude Code 和 Codex 不各说各话。",
         avoid: "不要写临时进度和普通修复细节。",
         example: "开工读 charter / plan / 进展顶部；收工写进展、决策和踩坑"

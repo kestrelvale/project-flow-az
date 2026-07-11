@@ -10,7 +10,7 @@
 
 这个 skill 负责两件事：
 
-1. **初始化 / 接入项目**：给项目铺好 `flow/`、`docs/`、`AGENTS.md`、`CLAUDE.md`、收工自检 hook 和方法论副本。
+1. **初始化 / 接入项目**：先判断单体项目、单仓多子项目或多独立仓库，再铺好对应层级的 `flow/`、`docs/`、规则入口、收工自检 hook 和方法论副本。
 2. **收工交接**：在 `flow/进展.md` 顶部追加一条交接记录，并把同一条贴回对话。
 
 它不处理具体业务内容。业务方案、代码、调研、设计稿仍由对应项目和对应 Agent 完成；`project-flow-cy` 只负责把协作方式和交接结构立起来。
@@ -21,6 +21,7 @@
 
 - 给一个新项目搭 Claude Code / Codex 共用的协作骨架
 - 把已有项目接入 `flow/` + `docs/` 文件化流程
+- 管理同时包含前端、后端、落地页或多个服务的单仓项目
 - 让多个 AI 会话、多个终端或多个模型之间能稳定接力
 - 收工时生成一条下一棒能直接复制使用的 handoff
 - 把方法论副本随项目保存，避免换会话后丢规则
@@ -63,7 +64,7 @@ git clone https://github.com/CY-CHENYUE/project-flow-cy ~/Documents/cc-skills/pr
 给这个项目搭 flow/docs 协作骨架
 ```
 
-执行时会先读 `references/初始化SOP.md`，然后列出将创建 / 修改的文件，等你确认后再动手。已有项目走非破坏合并：缺什么补什么，不覆盖用户已有内容。
+执行时会先读 `references/初始化SOP.md`。存在多个代码目录时，还会读 `references/多子项目结构.md`，先报告项目边界判断，再列出将创建 / 修改的文件，等你确认后动手。已有项目走非破坏合并：缺什么补什么，不覆盖用户已有内容。
 
 初始化后的典型结构：
 
@@ -80,9 +81,46 @@ git clone https://github.com/CY-CHENYUE/project-flow-cy ~/Documents/cc-skills/pr
 │   ├── tasks/
 │   └── 规范/
 ├── docs/
-├── scripts/ 或 src/                 # 代码项目才需要
+├── scripts/、src/ 或现有代码目录     # 保留项目自己的代码布局
 └── .hooks/ .claude/ .codex/
 ```
+
+### 单仓多子项目
+
+当前端、后端、落地页共同服务同一个总体项目，并共享仓库、目标和发布节奏时，它们属于一个项目边界。默认结构是：
+
+```text
+总体项目/
+├── AGENTS.md
+├── CLAUDE.md -> AGENTS.md
+├── flow/                              # 唯一总体控制层
+├── docs/                              # 文档统一入口
+│   ├── product/
+│   ├── architecture/
+│   ├── contracts/                    # API、事件、数据模型
+│   ├── modules/
+│   │   ├── frontend/
+│   │   ├── backend/
+│   │   └── landing/
+│   └── reviews/
+├── frontend/
+│   ├── AGENTS.md
+│   ├── CLAUDE.md -> AGENTS.md
+│   └── <源码、测试、构建配置>
+├── backend/
+│   ├── AGENTS.md
+│   ├── CLAUDE.md -> AGENTS.md
+│   └── <源码、测试、构建配置>
+├── landing/
+│   ├── AGENTS.md
+│   ├── CLAUDE.md -> AGENTS.md
+│   └── <源码、测试、构建配置>
+└── .hooks/ .claude/ .codex/          # 只放根级
+```
+
+根级 `flow/` 统一管理总体目标、计划、任务、决策、问题和交接；根级 `docs/` 统一管理产品、架构、跨模块契约和需要集中查找的模块说明。子项目目录主要保存源码、测试和构建配置，不重复创建 `flow/` 或完整 `docs/`。
+
+已有的子项目 README、工具生成文档或必须紧贴代码维护的说明不会被搬走，只会在根级 `docs/README.md` 建索引。若某个子项目有独立 Git 仓库、版本、发布或团队边界，才把它当成独立项目，建立自己的完整协作骨架。
 
 ### 收工交接
 
@@ -117,16 +155,22 @@ skill 会在 `flow/进展.md` 顶部追加一条记录，字段包括：
 | `LICENSE` / `NOTICE` | 开源许可证和版权归属说明 |
 | `references/初始化SOP.md` | 项目接入流程和自检清单 |
 | `references/工作流程.md` | 五段式主循环、接力机制、目录归属 |
+| `references/多子项目结构.md` | 单体、monorepo、多独立仓库的边界和目录规则 |
 | `references/文档维护SOP.md` | `AGENTS.md` 怎么维护 |
 | `references/DESIGN维护SOP.md` | `DESIGN.md` 怎么维护 |
 | `references/hook机制.md` | 收工自检 hook 的机制与安装说明 |
 | `assets/templates/` | 注入项目的模板文件 |
+| `assets/templates/MODULE_AGENTS.md` | 子项目局部规则入口模板 |
+| `evals/evals.json` | 单仓、多独立仓库和非破坏接入行为用例 |
+| `tests/test-multi-project-structure.sh` | 校验多子项目规则、模板和评测结构一致性 |
 | `tests/test-stop-hook.sh` | 验证 Codex 安全放行与 Claude Code 单次续跑分流 |
 | `visual-guide.html` | 可视化说明页 |
 
 ## 方法论要点
 
-- **目录归属**：协调 / 推进项目的内容进 `flow/`；交付物本身进 `docs/`、`scripts/` 或 `src/`。
+- **一个项目边界一个控制面**：单仓多子项目只保留一套根级 `flow/`、`docs/` 和 hook。
+- **目录归属**：协调 / 推进项目的内容进根级 `flow/`；需要统一发现的知识和方案进根级 `docs/`；代码进对应子项目。
+- **规则分层、文档集中**：根级和子项目可以有各自作用域的 `AGENTS.md`，总体文档仍集中管理；代码邻近文档只作为明确例外保留。
 - **进展日志**：`flow/进展.md` 是接力棒，新的记录放最上面，顶部那条就是当前 handoff。
 - **运行时合同**：根级 `AGENTS.md` 是两个工具共读的规则入口，`CLAUDE.md` 软链到它。
 - **文档不漂移**：`AGENTS.md` 固化收工约束；Stop hook 在 Claude Code 端自动续跑提醒。Codex 端当前默认安全放行，以规避已在 CLI 0.144.1 实证的自动续跑消息 ID 兼容问题，详见 `references/hook机制.md`。
@@ -140,6 +184,7 @@ skill 会在 `flow/进展.md` 顶部追加一条记录，字段包括：
 
 - 不替你写业务方案、代码、调研或设计成品。
 - 不自动提交或推送 GitHub。
+- 不把一个 monorepo 的每个代码目录机械初始化成独立项目。
 - 不擅自覆盖已有 `AGENTS.md`、`CLAUDE.md`、hook 配置或用户文档。
 - 不擅自修改全局 Codex / Claude 配置。
 
