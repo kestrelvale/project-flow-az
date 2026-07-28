@@ -38,6 +38,20 @@
         "只提出一套根级 flow/、docs/ 和 hook，不在子项目重复创建",
         "实际写入前先展示非破坏合并清单并等待确认"
       ]
+    },
+    {
+      "id": 4,
+      "prompt": "这个项目已经接入旧版 project-flow-cy。现在 Codex Stop Hook 还是直接 continue:true，但 .codex/hooks.json 里还混有我们自己的通知 Hook。请升级到当前收工自检机制，保留历史兼容边界；先给修改清单，不要改全局 Codex 配置，也不要覆盖自定义 Hook。",
+      "expected_output": "先确认旧 stop-doccheck.sh 确实属于 project-flow，再只升级项目级脚本与注入的规范副本；保留 .codex/hooks.json 里的其他 handler，现有 command 未变则不要求重新批准。说明 Claude 与 Codex >=0.145.0 首次 block、同一 prompt/turn 后续放行，0.144.1 和未知版本安全放行，并等待用户确认后再写入。",
+      "files": [],
+      "expectations": [
+        "先比对旧脚本来源，不能把未知自定义 Hook 当成 project-flow 覆盖",
+        "保留 .codex/hooks.json 中已有的通知或其他 handler",
+        "不修改全局 ~/.codex/config.toml 或用户级 hooks.json",
+        "说明 Claude 使用 prompt_id、Codex 使用 turn_id，首次 block 且同一 scope 后续 continue",
+        "把 Codex 0.144.1 作为已知不兼容历史，0.145.0 作为已完成三段验证的兼容门",
+        "列出项目级脚本和 flow/规范副本的修改清单并等待确认"
+      ]
     }
   ]
 }

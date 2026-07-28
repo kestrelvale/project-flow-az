@@ -28,10 +28,13 @@ require_text() {
 require_file "references/多子项目结构.md"
 require_file "assets/templates/MODULE_AGENTS.md"
 require_file "evals/evals.json"
+require_file "tests/test-codex-stop-hook-e2e.sh"
 
 require_text "SKILL.md" "一个项目边界一个控制面"
 require_text "SKILL.md" "assets/templates/MODULE_AGENTS.md"
+require_text "SKILL.md" '不低于 `0.145.0`'
 require_text "references/初始化SOP.md" "不在子项目重复创建"
+require_text "references/hook机制.md" 'Claude Code 只接受 `prompt_id`，Codex 只接受 `turn_id`'
 require_text "references/文档维护SOP.md" "规则就近,文档集中"
 require_text "README.md" "单仓多子项目"
 
@@ -43,7 +46,7 @@ fi
 
 jq -e '
   .skill_name == "project-flow-cy" and
-  (.evals | length) >= 3 and
+  (.evals | length) >= 4 and
   all(.evals[];
     (.prompt | type == "string" and length > 0) and
     (.expected_output | type == "string" and length > 0) and

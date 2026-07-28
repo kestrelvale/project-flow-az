@@ -26,9 +26,9 @@ description: 用一套基于文件的多 Agent 协作流程来初始化和管理
 3. **先列清单等确认**:把项目边界判断和"将创建 / 修改的文件"列给用户,确认后再动手。
 4. **铺根级骨架**:每个项目边界只建一套 `flow/`(`charter.md` `plan.md` `进展.md` `decisions.md` `踩坑记录.md` `tasks/`)+ `docs/`。已有代码布局原样保留;只有全新单体代码项目且用户需要时才补 `src/` 或 `scripts/`,不要替 monorepo 猜造业务目录。
 5. **生成分层入口**:用 `assets/templates/AGENTS.md` 生成根级 `AGENTS.md`,再让根级 `CLAUDE.md` 指向它。单仓多子项目中,每个有独立职责的子项目用 `assets/templates/MODULE_AGENTS.md` 生成局部 `AGENTS.md` 并建立同目录 `CLAUDE.md` 软链(Windows 改复制);局部入口只写本模块职责、命令、约束和根级指针,不复制总体计划。可选 `DESIGN.md` 仅用于设计 / 创意工作。
-6. **装 hook**:只在每个项目边界的根目录复制 `assets/templates/.hooks/`、`.claude/`、`.codex/`;`chmod +x .hooks/stop-doccheck.sh`;检测 Codex `features.hooks` 是否有效(当前默认 true,若被关才提醒用户开 `~/.codex/config.toml` 或 `--enable hooks`)——**不擅自改全局 config**;提醒 Codex 项目需 trust 且 `/hooks` 批准。Codex 路径当前默认安全放行、不自动续跑;兼容问题已在 CLI 0.144.1 实证,恢复条件见 `references/hook机制.md`。
+6. **装 hook**:只在每个项目边界的根目录复制 `assets/templates/.hooks/`、`.claude/`、`.codex/`;`chmod +x .hooks/stop-doccheck.sh`;检测 Codex 版本与 `features.hooks`。Claude Code 只以 `prompt_id`、可解析版本不低于 `0.145.0` 的 Codex 只以 `turn_id` 界定用户回合,每回合自动续跑一次;更旧、未知版本或缺本工具专属稳定 ID 时安全放行。若 hooks 被关只提醒用户开 `~/.codex/config.toml` 或用 `--enable hooks`,**不擅自改全局 config**;提醒 Codex 项目需 trust 且 `/hooks` 批准。历史事故与版本门见 `references/hook机制.md`。
 7. **详规随项目**:把 `references/` 下 6 份详规复制到根级 `flow/规范/`(自包含)。
-8. **跑接入自检**:先运行 `bash tests/test-stop-hook.sh`,再逐项核对 `references/初始化SOP.md` 末尾清单(软链是否解析正确、hook 是否输出合法 JSON、根级和模块级边界是否正确),把结果报告给用户。
+8. **跑接入自检**:在 Skill 源码目录先运行 `bash tests/test-stop-hook.sh`,再逐项核对 `references/初始化SOP.md` 末尾清单(软链是否解析正确、hook 是否输出合法 JSON、根级和模块级边界是否正确)。Codex 客户端升级或 continuation 机制变动后,显式运行 `PROJECT_FLOW_RUN_CODEX_TUI_E2E=1 bash tests/test-codex-stop-hook-e2e.sh`;该测试会调用在线模型,不能混入普通快速回归。
 9. **收尾**:引导用户开始填根级 `flow/charter.md`;多子项目时一并确认子项目地图和跨模块契约目录。
 
 幂等:可重复跑,不产生重复或破坏(也是更新老项目详规副本的方式)。

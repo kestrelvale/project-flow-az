@@ -29,6 +29,7 @@
    - 在同目录建立 `CLAUDE.md -> AGENTS.md`(Windows 改复制)。局部入口只写本模块职责、命令、约束和根级指针。
    - 不在子项目重复创建 `flow/`、`docs/`、`.hooks/`、`.claude/`、`.codex/`;不移动已有局部文档。根级 `docs/README.md` 对保留在模块内的文档加索引。
 7. **装根级 hook**:复制 `.hooks/stop-doccheck.sh` → `chmod +x` → 写根级 `.claude/settings.json` 与 `.codex/hooks.json`。
+   - 读取实际 `codex --version`:可解析且不低于 `0.145.0` 时启用单次自动续跑;更旧或未知版本由脚本安全放行。`0.144.1` 是已知不兼容版本,应先升级。
    - Codex 当前 `features.hooks` 默认 true;检测有效状态,若被关才**提醒用户**开(或 `--enable hooks`),**不擅自改全局 `~/.codex/config.toml`**。
    - 提醒:Codex 项目级 `.codex/` 层需项目 trust,且需 `/hooks` 审核批准。〔细节见 `hook机制.md`〕
 8. **方法论详规随项目**:把 6 份详规复制进根级 `flow/规范/`(自包含)。〔或改为引用中心版——待定 #3〕
@@ -51,7 +52,8 @@
 - [ ] 每个有独立职责的子项目都有局部 `AGENTS.md` 与同源 `CLAUDE.md`;根级相对路径均可解析
 - [ ] 子项目没有新增重复的 `flow/`、`docs/` 或 hook;保留在模块内的文档已从根级 `docs/README.md` 索引
 - [ ] (若有设计工作)`DESIGN.md` 存在
-- [ ] 先运行 `bash tests/test-stop-hook.sh`;再确认 `.hooks/stop-doccheck.sh` 可执行:Codex 首次与续跑都输出 `continue:true`;Claude 首次输出 `decision:block`,续跑输出 `continue:true`。该分流规避已在 Codex CLI 0.144.1 实证的自动 continuation prompt 裸 UUID message id 问题。
+- [ ] 在 `project-flow-cy` Skill 源码目录运行 `bash tests/test-stop-hook.sh`;确认目标项目 `.hooks/stop-doccheck.sh` 可执行:Claude 只按 `prompt_id`、兼容的 Codex 只按 `turn_id` 界定回合,首次 Stop 输出 `decision:block`,同一 scope 的 active 或重复 Stop 输出 `continue:true`;错误字段、旧版、未知版本、非法输入和缺少专属稳定 ID 时安全放行
+- [ ] Codex 客户端升级或改动 continuation 机制后,按需显式运行 `PROJECT_FLOW_RUN_CODEX_TUI_E2E=1 bash tests/test-codex-stop-hook-e2e.sh`,验证首次续跑、同会话继续、退出恢复、`msg_` ID 与 `invalid_id_prefix`
 - [ ] `.claude/settings.json`、`.codex/hooks.json` 已写
 - [ ] Codex 项目已 trust;`features.hooks` 未被关闭;`/hooks` 已批准
 - [ ] 根级 `flow/规范/` 下 6 份详规齐

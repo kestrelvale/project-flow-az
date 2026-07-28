@@ -1358,8 +1358,8 @@
           <h3>它怎么响</h3>
           <div class="hook-visual">
             <div class="hook-step"><i>1</i><span>Agent 准备停止时，Stop hook 触发。</span></div>
-            <div class="hook-step"><i>2</i><span>Claude Code 返回一次收工提醒；Codex 当前走安全放行。</span></div>
-            <div class="hook-step"><i>3</i><span>Claude Code 自检后再次停止，脚本放行，避免循环。</span></div>
+            <div class="hook-step"><i>2</i><span>Claude Code 与兼容的 Codex 返回一次收工提醒。</span></div>
+            <div class="hook-step"><i>3</i><span>同一用户回合再次停止时，脚本识别稳定 ID 并放行。</span></div>
           </div>
         </article>
         <article class="hook-panel">
@@ -1368,7 +1368,7 @@
           <code class="code-path">ln -s /Users/cychenyue/Documents/cc-skills/project-flow-cy ~/.agents/skills/project-flow-cy</code>
           <details>
             <summary>给懂工具的人看的细节</summary>
-            <p>Codex 当前 `features.hooks` 默认开启。项目级 `.codex/hooks.json` 只有在项目被 trust 后加载。Codex 路径当前始终返回 `continue:true`；Claude Code 首次返回 `decision:block`，续跑时返回 `continue:true`。</p>
+            <p>Codex 当前 `features.hooks` 默认开启。项目级 `.codex/hooks.json` 只有在项目被 trust 后加载。Claude Code 使用 `prompt_id`，Codex 使用 `turn_id`；首次返回 `decision:block`，同一 scope 后续返回 `continue:true`。Codex 低于 `0.145.0` 或版本无法识别时安全放行。</p>
           </details>
         </article>
       </div>

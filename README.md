@@ -161,9 +161,10 @@ skill 会在 `flow/进展.md` 顶部追加一条记录，字段包括：
 | `references/hook机制.md` | 收工自检 hook 的机制与安装说明 |
 | `assets/templates/` | 注入项目的模板文件 |
 | `assets/templates/MODULE_AGENTS.md` | 子项目局部规则入口模板 |
-| `evals/evals.json` | 单仓、多独立仓库和非破坏接入行为用例 |
+| `evals/evals.json` | 单仓、多独立仓库、非破坏接入与旧 Hook 升级行为用例 |
 | `tests/test-multi-project-structure.sh` | 校验多子项目规则、模板和评测结构一致性 |
-| `tests/test-stop-hook.sh` | 验证 Codex 安全放行与 Claude Code 单次续跑分流 |
+| `tests/test-stop-hook.sh` | 验证双端单次续跑、版本门、稳定回合 ID、异常输入与并发防重 |
+| `tests/test-codex-stop-hook-e2e.sh` | 显式运行真实 Codex TUI 的首次／同会话／退出恢复回归 |
 | `visual-guide.html` | 可视化说明页 |
 
 ## 方法论要点
@@ -173,12 +174,12 @@ skill 会在 `flow/进展.md` 顶部追加一条记录，字段包括：
 - **规则分层、文档集中**：根级和子项目可以有各自作用域的 `AGENTS.md`，总体文档仍集中管理；代码邻近文档只作为明确例外保留。
 - **进展日志**：`flow/进展.md` 是接力棒，新的记录放最上面，顶部那条就是当前 handoff。
 - **运行时合同**：根级 `AGENTS.md` 是两个工具共读的规则入口，`CLAUDE.md` 软链到它。
-- **文档不漂移**：`AGENTS.md` 固化收工约束；Stop hook 在 Claude Code 端自动续跑提醒。Codex 端当前默认安全放行，以规避已在 CLI 0.144.1 实证的自动续跑消息 ID 兼容问题，详见 `references/hook机制.md`。
+- **文档不漂移**：`AGENTS.md` 固化收工约束；Stop hook 在 Claude Code 与版本不低于 `0.145.0` 的 Codex 端，每个用户回合只自动续跑一次。更旧或无法识别的 Codex 安全放行；`0.144.1` 的历史消息 ID 事故和 `0.145.0` 三段回归证据见 `references/hook机制.md`。
 - **非破坏接入**：已有项目只补缺失内容，遇到冲突先列清单请用户确认。
 
 ## 更新旧项目
 
-这个 skill 是幂等的。已经接入过的项目可以重复运行初始化操作，用来补缺失文件或刷新 `flow/规范/` 下的方法论副本。
+这个 skill 是幂等的。已经接入过的项目可以重复运行初始化操作，用来补缺失文件、在确认旧脚本属于 project-flow 后升级根级 Hook，或刷新 `flow/规范/` 下的方法论副本。Codex command handler 没变时不需要因脚本内容更新重新批准；自定义 Hook 仍按冲突处理，不会覆盖。
 
 ## 边界
 
