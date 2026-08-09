@@ -1,6 +1,6 @@
 # Hook 机制（收工自检）
 
-> Claude Code 与通过兼容门的 Codex 在每个用户回合收尾时自动续跑一次，检查两件事：① 文档是否要按 `文档维护SOP.md`／`DESIGN维护SOP.md` 更新；② 是否已在 `flow/进展.md` 顶部留下交接记录。
+> Claude Code 与通过兼容门的 Codex 在每个用户回合收尾时自动续跑一次，先执行当前路径生效的 `AGENTS.md`／`CLAUDE.md` 中已有的业务专项收工检查，再检查两件事：① 文档是否要按 `文档维护SOP.md`／`DESIGN维护SOP.md` 更新；② 是否已在 Hook 所属项目根的 `flow/进展.md` 顶部留下交接记录。
 > Hook 是防漂移兜底，不替代 Agent 主动遵守收工约定。
 
 ## 作用域
@@ -97,7 +97,7 @@ if ! mkdir "$marker" 2>/dev/null; then
   continue_safe
 fi
 
-reason="【收工自检】① 文档:本轮若有 结构/方案、心智模型、方向、外部资料、设计 变更 → 提议更新 ${docname}(注明层级)或 DESIGN.md,列出修改点等确认。② 交接:在 flow/进展.md 最上面追加一条进展(做了什么/为什么/怎么理解/产出路径/问题→解决/下一步)并把这条贴在回复里给用户看,决策落 decisions.md、坑落 踩坑记录.md。都没有就回复「无需更新」。"
+reason="【收工自检】先读取当前路径生效的 ${docname}；若其中有业务专项收工检查，先执行该检查且不扩大本轮授权。① 文档:本轮若有 结构/方案、心智模型、方向、外部资料、设计 变更 → 提议更新对应层级的 ${docname} 或 DESIGN.md,列出修改点等确认。② 交接:在本 Hook 所属项目根的 flow/进展.md 最上面追加一条进展(做了什么/为什么/怎么理解/产出路径/问题→解决/下一步)并把这条贴在回复里给用户看,决策落 decisions.md、坑落 踩坑记录.md。都没有就回复「无需更新」。"
 jq -n --arg r "$reason" '{decision:"block", reason:$r}'
 ```
 
@@ -107,6 +107,7 @@ jq -n --arg r "$reason" '{decision:"block", reason:$r}'
 - marker 表示该用户回合已经触发过，保持单调存在。首次通过原子 `mkdir` 成功的调用返回 `decision:block`；同一 scope 后续无论 `stop_hook_active` 是否正确设置，都只返回 `continue:true`。
 - Codex 只有在本机可解析版本不低于 `0.145.0` 时启用自动续跑。旧版本、未知版本、非法或不适合作为文件名的 ID、缺少 `jq`、缺少本工具专属稳定 scope 或 marker 无法建立时安全放行；脚本不依赖外部 `tr` 或 `id` 命令。
 - `reason` 用 `jq -n` 生成，避免手工转义中文和引号。
+- 上层项目 Hook 被子目录复用时，续跑提示先读取当前路径实际生效的 Agent 入口并执行其中的专项收工检查；项目交接仍只写回 Hook 所属项目根的 `flow/`，不会在子目录另建第二套控制层。
 
 ## 两端薄配置
 

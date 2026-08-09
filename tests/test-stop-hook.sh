@@ -97,6 +97,8 @@ assert_block() {
       .decision == "block"
       and (.reason | contains("收工自检"))
       and (.reason | contains($docname))
+      and (.reason | contains("业务专项收工检查"))
+      and (.reason | contains("Hook 所属项目根"))
     ' >/dev/null
 }
 
