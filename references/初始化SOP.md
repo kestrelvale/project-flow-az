@@ -19,7 +19,7 @@
    - 按 `多子项目结构.md` 判断单体项目、单仓多子项目或多个独立仓库。拿不准就把判断依据列给用户确认。
 2. **判断接入状态**:每个确认的项目边界有无 `AGENTS.md` / 已有内容 → 决定全量铺或非破坏合并。
 3. **先报清单并确认**:说明边界判断、根级将创建 / 修改的文件、各子项目局部入口,以及明确不会创建 / 移动的内容。用户确认后再动手。
-4. **铺根级骨架**:每个项目边界只建一套 `flow/`(`charter.md` `plan.md` `进展.md` `decisions.md` `踩坑记录.md` `tasks/`)+ `docs/`(放 `README.md`)。保留已有代码布局;只有全新单体代码项目且用户需要时才补 `scripts/` 或 `src/`,不替 monorepo 猜造业务目录。〔归属规则见 `工作流程.md`〕
+4. **铺根级骨架**:每个项目边界只建一套 `flow/`(`charter.md` `plan.md` `进展.md` `decisions.md` `踩坑记录.md` `tasks/` `archive/`)+ `docs/`(放 `README.md`)。保留已有代码布局;只有全新单体代码项目且用户需要时才补 `scripts/` 或 `src/`,不替 monorepo 猜造业务目录。〔归属规则见 `工作流程.md`〕
 5. **根级入口注入**:
    - 写 `AGENTS.md`(从 `templates/AGENTS.md`:精要规则 + 约束 + 目录地图 + 指针;已有项目则**合并**进现有 AGENTS.md)。
    - 建软链:`ln -s AGENTS.md CLAUDE.md`(Windows 改复制一份)。
@@ -32,7 +32,7 @@
    - 读取实际 `codex --version`:可解析且不低于 `0.145.0` 时启用单次自动续跑;更旧或未知版本由脚本安全放行。`0.144.1` 是已知不兼容版本,应先升级。
    - Codex 当前 `features.hooks` 默认 true;检测有效状态,若被关才**提醒用户**开(或 `--enable hooks`),**不擅自改全局 `~/.codex/config.toml`**。
    - 提醒:Codex 项目级 `.codex/` 层需项目 trust,且需 `/hooks` 审核批准。〔细节见 `hook机制.md`〕
-8. **方法论详规随项目**:把 6 份详规复制进根级 `flow/规范/`(自包含)。〔或改为引用中心版——待定 #3〕
+8. **方法论详规随项目**:把 7 份详规复制进根级 `flow/规范/`(自包含)。〔或改为引用中心版——待定 #3〕
 
 ## 已有项目的非破坏合并细则
 - 模板文件不存在才复制;已有 `flow/*.md`、`docs/README.md`、`DESIGN.md` 默认不覆盖。
@@ -56,5 +56,5 @@
 - [ ] Codex 客户端升级或改动 continuation 机制后,按需显式运行 `PROJECT_FLOW_RUN_CODEX_TUI_E2E=1 bash tests/test-codex-stop-hook-e2e.sh`,验证首次续跑、同会话继续、退出恢复、`msg_` ID 与 `invalid_id_prefix`
 - [ ] `.claude/settings.json`、`.codex/hooks.json` 已写
 - [ ] Codex 项目已 trust;`features.hooks` 未被关闭;`/hooks` 已批准
-- [ ] 根级 `flow/规范/` 下 6 份详规齐
+- [ ] 根级 `flow/规范/` 下 7 份详规齐
 - [ ] `flow/charter.md` 已开始填
