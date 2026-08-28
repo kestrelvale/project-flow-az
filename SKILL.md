@@ -76,7 +76,7 @@ description: 用一套基于四状态机(待完成[]/待验收[-]/已完成[✓]
 1. **先判项目边界**:扫描当前目录代码入口与配置，判断是单体项目、单仓多子项目(monorepo)还是多个独立仓库。一个项目边界一个控制面，多子项目先读 `references/多子项目结构.md`。
 2. **判断状态**:目录是否已有 `AGENTS.md` / 内容。新项目全量铺;已有项目非破坏合并(缺啥补啥,绝不覆盖已有内容)。
 3. **先列清单等确认**:把项目边界判断和"将创建 / 修改的文件"列给用户,确认后再动手。
-4. **铺根级骨架**:每个项目边界只建一套 `flow/`(`charter.md` `plan.md` `进展.md` `decisions.md` `踩坑记录.md` `tasks/` `archive/`)+ `docs/`。
+4. **铺根级骨架**:每个项目边界只建一套 `flow/`(`charter.md` `plan.md` `进展.md` `decisions.md` `踩坑记录.md` `tasks/` `history/` `trash/`)+ `docs/`。
 5. **生成分层入口**:用 `assets/templates/AGENTS.md` 生成根级 `AGENTS.md`,再让根级 `CLAUDE.md` 指向它。单仓多子项目中，每个有独立职责的子项目用 `assets/templates/MODULE_AGENTS.md` 生成局部 `AGENTS.md` 并建立同目录 `CLAUDE.md` 软链(Windows 改复制);局部入口只写本模块职责、命令、约束和根级指针,不复制总体计划。可选 `DESIGN.md` 仅用于设计 / 创意工作。
 6. **装 hook**:只在每个项目边界根目录复制 `assets/templates/.hooks/`、`.claude/`、`.codex/`;`chmod +x .hooks/stop-doccheck.sh`。Claude Code 只以 `prompt_id`、可解析版本不低于 `0.145.0` 的 Codex 只以 `turn_id` 界定用户回合,每回合自动续跑一次;更旧或未知版本安全放行。
 7. **详规随项目**:把 `references/` 下详规复制到根级 `flow/规范/`(自包含)。
