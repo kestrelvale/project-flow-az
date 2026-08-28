@@ -45,7 +45,7 @@ if grep -R -n -E '5 份详规|5份详规|五份详规' \
 fi
 
 jq -e '
-  .skill_name == "project-flow-cy" and
+  (.skill_name == "project-flow-az" or .skill_name == "project-flow-cy") and
   (.evals | length) >= 4 and
   all(.evals[];
     (.prompt | type == "string" and length > 0) and

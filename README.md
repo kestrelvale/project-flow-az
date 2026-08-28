@@ -1,4 +1,7 @@
-# project-flow-cy
+# project-flow-az
+
+> 基于 [CY-CHENYUE/project-flow-cy](https://github.com/CY-CHENYUE/project-flow-cy) 深度魔改的 **AI 多 Agent 协作与任务闭环管理体系（四状态机与即时回收版）**。
+> 彻底解决原版“历史任务死循环复读、缺乏即时回收机制、上下文全量污染、旧计划绑架当面指令”等工程治理弊端。兼容 `project-flow-az` 与 `project-flow-cy` 双别名触发。
 
 把任何项目（代码 / 调研 / 内容 / 方案）当 repo 管的一套 **AI 多 Agent 协作流程**。
 
@@ -39,19 +42,19 @@
 
 ```bash
 # Codex / 本机统一技能目录示例
-git clone https://github.com/CY-CHENYUE/project-flow-cy ~/.codex/skills/project-flow-cy
+git clone https://github.com/kestrelvale/project-flow-az ~/.codex/skills/project-flow-az
 
 # 如果你的 Claude Code 扫描 ~/.claude/skills
-git clone https://github.com/CY-CHENYUE/project-flow-cy ~/.claude/skills/project-flow-cy
+git clone https://github.com/kestrelvale/project-flow-az ~/.claude/skills/project-flow-az
 ```
 
 如果你用的是统一的技能仓库，也可以把本仓库作为子目录放进去，例如：
 
 ```bash
-git clone https://github.com/CY-CHENYUE/project-flow-cy ~/Documents/cc-skills/project-flow-cy
+git clone https://github.com/kestrelvale/project-flow-az ~/Documents/cc-skills/project-flow-az
 ```
 
-安装或更新后，新开会话，确认 skill 列表里出现 `project-flow-cy`。
+安装或更新后，新开会话，确认 skill 列表里出现 `project-flow-az`（或 `project-flow-cy`）。
 
 ## 怎么用
 
@@ -59,6 +62,10 @@ git clone https://github.com/CY-CHENYUE/project-flow-cy ~/Documents/cc-skills/pr
 
 在目标项目目录里说：
 
+```text
+用 project-flow-az 接入协作流程
+```
+或：
 ```text
 用 project-flow-cy 接入协作流程
 ```
