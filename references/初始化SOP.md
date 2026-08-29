@@ -19,7 +19,7 @@
    - 按 `多子项目结构.md` 判断单体项目、单仓多子项目或多个独立仓库。拿不准就把判断依据列给用户确认。
 2. **判断接入状态**:每个确认的项目边界有无 `AGENTS.md` / 已有内容 → 决定全量铺或非破坏合并。
 3. **先报清单并确认**:说明边界判断、根级将创建 / 修改的文件、各子项目局部入口,以及明确不会创建 / 移动的内容。用户确认后再动手。
-4. **铺根级骨架**:每个项目边界只建一套 `flow/`(`charter.md` `plan.md` `进展.md` `decisions.md` `踩坑记录.md` `tasks/` `archive/`)+ `docs/`(放 `README.md`)。保留已有代码布局;只有全新单体代码项目且用户需要时才补 `scripts/` 或 `src/`,不替 monorepo 猜造业务目录。〔归属规则见 `工作流程.md`〕
+4. **铺根级骨架**:每个项目边界只建一套 `flow/`(`charter.md` `plan.md` `进展.md` `decisions.md` `踩坑记录.md` `tasks/` `history/` `trash/`)+ `docs/`(放 `README.md`)。保留已有代码布局;只有全新单体代码项目且用户需要时才补 `scripts/` 或 `src/`,不替 monorepo 猜造业务目录。〔归属规则见 `工作流程.md`〕
 5. **根级入口注入**:
    - 写 `AGENTS.md`(从 `templates/AGENTS.md`:精要规则 + 约束 + 目录地图 + 指针;已有项目则**合并**进现有 AGENTS.md)。
    - 建软链:`ln -s AGENTS.md CLAUDE.md`(Windows 改复制一份)。
