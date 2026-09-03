@@ -77,3 +77,15 @@
 | **Gate 2** | **Disjoint Write Set 门禁** | 派发多个子 Agent 时，写入文件列表交集必须为空（WriteSet_A ∩ WriteSet_B = ∅）。 | 禁止派发，必须先重构切片范围。 |
 | **Gate 3** | **控制面单写门禁** | 严禁子 Agent 读写 `flow/` 控制面文件。 | 污染主看板，导致状态机混乱。 |
 | **Gate 4** | **自检反查门禁** | 收到 `【收工自检】` 拦截时，强制反查子 Agent 是否全量完工且代码已落盘。若否，立即继续执行。 | 杜绝假完工与半路交卷。 |
+---
+
+## 4. 双引擎自适应降级与兼容机制 (Dual-Engine Fallback)
+
+在不同模型中继服务商或 Codex 客户端版本中，`spawn_agent` 的后端协议支持可能存在差异（如上游返回 `unsupported call: multi_agent_v1__spawn_agent`）。为了保证 100% 任务高可用，架构设计了双引擎降级机制：
+
+| 运行环境 | 调度引擎 | 执行方式 |
+|:---|:---|:---|
+| **原生 Multi-Agent 支持环境** | **Engine A (`spawn_agent`)** | 直接派发轻量沙箱子 Agent，并行等待 `wait_agent` 并集成。 |
+| **中继无原生子 Agent 协议环境** | **Engine B (Sub-Task Thread / Modular Subprocess / Session Relay)** | 1. 通过 `create_thread` 派发独立背景任务并使用 `wait_threads` 聚合；<br/>2. 或由主控 Agent 严格按**多子项动态销账 (In-Prompt Pruning)** 与**单模块串行/沙箱隔离执行**，严格禁止在聊天窗口 Dump 长文本，保持单模块切片轻装推进。 |
+
+无论采用哪种引擎，**“代码落地硬门禁”、“写入边界隔离” 与 “单写 flow/ 控制面”** 均为不变的绝对铁律！
