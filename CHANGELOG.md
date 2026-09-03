@@ -1,3 +1,9 @@
+## [2.3.0] - 2026-09-04
+### Added
+- **会话健康度监控与自动接力预警 (Session Relay & Context Health Gate)**: 在 `stop-doccheck.sh` 与 `AGENTS.md` 中内置轮次计数器与 Token 阈值熔断机制；
+- **智能截断防御**: 当单会话交互达到 8~10 轮临界区时，自动在 Stop Hook 与交付卡中输出【会话熔断预警】，提示用户开新会话轻装接力，彻底杜绝模型因上下文超载发生语法退化与工具截断；
+- **知识答疑与机理阐明**: 明确区分“磁盘物理文件回收 (GC)”与“单会话内存追加 (Append-Only)”的技术本质差异。
+
 ## [2.2.0] - 2026-09-03
 ### Added
 - **Sub-Agent Swarm 多 Agent 并行协作体系**: 引入 Orchestrator 调度总控与 Worker 隔离执行模型，支持 `spawn_agent` / `wait_agent` 派发前端、后端、测试、深度调研子 Agent。

@@ -78,5 +78,19 @@ if ! mkdir "$marker" 2>/dev/null; then
   continue_safe
 fi
 
-reason="【收工自检】先读取当前路径生效的 ${docname}；若其中有业务专项收工检查，先执行该检查且不扩大本轮授权。① 文档:本轮若有 结构/方案、心智模型、方向、外部资料、设计 变更 → 提议更新对应层级的 ${docname} 或 DESIGN.md,列出修改点等确认。② 交接:在本 Hook 所属项目根的 flow/进展.md 最上面追加一条进展(做了什么/为什么/怎么理解/产出路径/问题→解决/下一步)并把这条贴在回复里给用户看,决策落 decisions.md、坑落 踩坑记录.md。都没有就回复「无需更新」。"
+# Session Turn Counter & Context Health Guard
+turn_counter_file="$marker_root/turn-count-${sid}"
+current_turns=1
+if [ -f "$turn_counter_file" ]; then
+  prev_turns="$(cat "$turn_counter_file" 2>/dev/null || echo 0)"
+  current_turns=$((prev_turns + 1))
+fi
+printf "%s" "$current_turns" > "$turn_counter_file" 2>/dev/null || true
+
+relay_warning=""
+if [ "$current_turns" -ge 8 ]; then
+  relay_warning="\n\n⚠️【会话熔断与接力预警】当前会话已连续交互 ${current_turns} 个回合（历史上下文堆叠已达临界区）。为防模型发生语法退化或截断，请在汇报末尾明确提醒用户：所有成果已落盘实体，强烈建议在侧边栏新建 Task 开新会话，读取 flow/进展.md 接力！"
+fi
+
+reason="【收工自检】先读取当前路径生效的 ${docname}；若其中有业务专项收工检查，先执行该检查且不扩大本轮授权。① 文档:本轮若有 结构/方案、心智模型、方向、外部资料、设计 变更 → 提议更新对应层级的 ${docname} 或 DESIGN.md,列出修改点等确认。② 交接:在本 Hook 所属项目根的 flow/进展.md 最上面追加一条进展(做了什么/为什么/怎么理解/产出路径/问题→解决/下一步)并把这条贴在回复里给用户看,决策落 decisions.md、坑落 踩坑记录.md。都没有就回复「无需更新」。${relay_warning}"
 jq -n --arg r "$reason" '{decision:"block", reason:$r}'
