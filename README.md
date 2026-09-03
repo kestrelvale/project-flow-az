@@ -60,6 +60,39 @@ git clone https://github.com/kestrelvale/project-flow-az ~/Documents/cc-skills/p
 
 安装或更新后，新开会话，确认 skill 列表里出现 `project-flow-az`（或 `project-flow-cy`）。
 
+## WikiSkill：持久经验与技能演化
+
+本仓库同时发布 WikiSkill，用于把 Agent 的执行轨迹编译为可复用的持久知识和技能，避免会话中断后丢失上下文。
+
+### 一键安装、初始化与挂载
+
+在终端执行：
+
+```bash
+git clone https://github.com/kestrelvale/project-flow-az.git
+cd project-flow-az
+bash scripts/install_wikiskill.sh
+```
+
+脚本会检查 Python 3.10+，初始化 `raw/traces/`、`wiki/`、`skills/`，并将 WikiSkill 挂载到 Codex 全局目录和当前项目 `.claude/skills/`。
+
+检查状态：
+
+```bash
+PYTHONPATH=. python3 -m wikiskill.cli --workspace . status
+```
+
+运行技能演化：
+
+```bash
+PYTHONPATH=. python3 -m wikiskill.cli --workspace . evolve \
+  --train data/train_tasks.json \
+  --val data/val_tasks.json \
+  --max-iters 5
+```
+
+完整说明见 [`skills/wikiskill/README.md`](skills/wikiskill/README.md)。
+
 ## 怎么用
 
 ### 初始化 / 接入项目

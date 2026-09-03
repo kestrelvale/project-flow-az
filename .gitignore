@@ -13,6 +13,8 @@
 *.log
 *.tmp
 *.bak
+__pycache__/
+*.pyc
 
 # Runtime output if someone runs the skill inside the skill repo by mistake
 /flow/

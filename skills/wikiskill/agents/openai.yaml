@@ -1,0 +1,3 @@
+interface:
+  display_name: "WikiSkill"
+  short_description: "Compile agent experience into persistent wiki knowledge and evolve procedural skills"
