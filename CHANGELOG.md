@@ -1,3 +1,14 @@
+## [4.0.0] - 2026-09-05 (终极战略驱动设计决胜版)
+### Added
+- **四大哲学思想全景融合**: 深度融合奥卡姆剃刀（去臃肿/3文件3步骤1铁律）、Ask-Matt（Smart Zone 150k边界/单票独立会话/Disposable Context）、孙子兵法（兵贵神速/探查预算≤3步/避实击虚）与矛盾论（主要矛盾第一/代码落地优先/具体问题具体分析）。
+- **四大先进驱动设计全链路贯通**:
+  - **SDD (规格驱动设计)**: 复合多需求原子化拆解（P0-1, P0-2...），锁死 I/O 契约与写入边界白名单 (Disjoint Write Sets)；
+  - **TDD (测试驱动开发)**: Defect-First 先写/跑失败用例，Ponytail 极简代码落盘使测试变绿；
+  - **ATDD (质量准入门禁)**: 确立专属微测试 <3s、Exit 0、0 PageError、截图存盘的自动化准入四要素；
+  - **BDD (行为驱动交付)**: 提请验收卡强制采用 Given-When-Then 场景化步骤，用户确认后物理剪切至 `flow/history/` 彻底结案。
+- **单会话绝对隔离与白名单切片过滤 (Domain Queueing)**: `flow/plan.md` 永远只存 1 组当前 P0 焦点（< 200 Tokens），多模块任务分卡独立维护，彻底阻断历史任务复读。
+- **探查预算门禁 (Probe Budget ≤ 3)**: 禁止无休止 Bash 扫盘，通过 CodeGraph 毫秒级定位。
+
 ## [2.3.0] - 2026-09-04
 ### Added
 - **会话健康度监控与自动接力预警 (Session Relay & Context Health Gate)**: 在 `stop-doccheck.sh` 与 `AGENTS.md` 中内置轮次计数器与 Token 阈值熔断机制；
