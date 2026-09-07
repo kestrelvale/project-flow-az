@@ -1,5 +1,29 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.codex/skills/project-flow-az/scripts/flow-sync.sh . >/dev/null 2>&1 || true",
+            "timeout": 10,
+            "statusMessage": "project-flow 热同步"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.codex/skills/project-flow-az/scripts/flow-sync.sh . >/dev/null 2>&1 || true",
+            "timeout": 10,
+            "statusMessage": "project-flow 热同步"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
