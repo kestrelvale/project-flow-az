@@ -27,3 +27,4 @@ __pycache__/
 /.hooks/
 /.claude/
 /.codex/
+*.bak*

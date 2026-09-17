@@ -1,3 +1,17 @@
+## [4.2.0] - 2026-09-17 (Delivery-First & 会话平滑接力防膨胀版)
+
+### Added
+- **Delivery-First 交付决胜体系**: 引入《项目交付物与交付契约SOP.md》，建立项目交付物法定总账 (`flow/deliverables.md`) 与外部大盘 (`docs/DELIVERY_PREVIEW.md`)，彻底消除任务完成但产物脱节顽疾；
+- **零污染治理规范**: 引入《工作区与根目录零污染治理规范.md》，强制四区隔离与根目录绝对纯净；
+- **会话平滑接力协议 (Session Relay SOP)**:
+  - 确立 20~25 轮会话深度熔断警报卡；
+  - 确立标准化开箱即用新会话接力提示词模板（带磁盘真理源、SDD 规格清单、写入白名单锁），实现零上下文包袱极速接力；
+- **两级图谱按需定位前置门禁**:
+  - 业务概念与规则严格优先检索 `knowledge/index.md` (OKF 知识图谱)；
+  - 源码与符号严格优先使用 `codegraph explore` 毫秒级符号定位；
+  - 严禁全盘裸扫与大文件大段翻读，杜绝单步 30 万 Token 恶性膨胀；
+- **彻底切除 Ruflo 外部依赖**: 废黜依赖 Anthropic Key 的 Ruflo 插件，全面基于磁盘物理契约自闭环。
+
 ## [4.0.1] - 2026-09-05 (全自动无感物理热同步落地)
 ### Added
 - **Hook 级全自动热同步 (Zero-Manual Hot-Sync)**: 在全局 `~/.codex/hooks.json` 与项目 `.codex/hooks.json` 中配置 `SessionStart` 和 `UserPromptSubmit` 自动执行 `flow-sync.sh`；

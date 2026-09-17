@@ -1,6 +1,6 @@
 ---
 name: wikiskill
-description: "Use when an agent needs to accumulate task execution experience into persistent knowledge, avoid catastrophic forgetting, compile traces into abstract pattern wikis, or propose, test, and gate-evolve procedural skills according to arXiv:2608.27454 (WikiSkill). Suitable for creating skills, evolving existing skill libraries, or inspecting execution patterns."
+description: "Use when an agent needs to accumulate task execution experience into persistent knowledge, avoid catastrophic forgetting."
 ---
 
 # WikiSkill: Compiling Agent Experience into Persistent Knowledge for Skill Evolution
