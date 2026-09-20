@@ -59,6 +59,8 @@ def main() -> None:
         )
         assert "ticket_id:" in template.read_text(encoding="utf-8"), template.read_text(encoding="utf-8")
         assert not (flow / "verification-tmp").exists()
+        assert (flow / "trash" / "verification").is_dir()
+        assert list((flow / "gc" / "receipts").glob("*.json")), "GC 必须留下回执"
         assert (root / "tmp" / "keep.txt").exists()
     print("PASS: audit-flow exposes completed legacy table rows")
 

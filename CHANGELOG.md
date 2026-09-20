@@ -216,3 +216,18 @@ All notable changes to `project-flow-az` will be documented in this file.
 7. **全双端兼容与别名机制**
    - 原生支持 `project-flow-az` 与 `project-flow-cy` 双别名触发与调用。
    - 完整兼容 Claude Code 与 Codex (`0.145.0+`) 单次续跑 Stop Hook 机制。
+## [4.9.0] - 2026-09-20 (四区归档与垃圾分离版)
+
+### Added
+- 建立四区归档模型：`history/{plans,tasks,progress}`、`trash/{deprecated,verification}`、`gc/receipts`。
+- `flow-gc.py` 增加 GC 回执，验证垃圾和日志轮转均可追溯。
+- `sync-project.py` 热更新时自动补齐四区目录，并迁移旧 `history/进展_archive.md` 与 `trash/verification-gc`。
+- `audit-flow.py` 增加四区目录规范检查。
+- 新增 `tests/test-archive-layout.py`。
+
+### Changed
+- 任务归档、日志轮转、验证垃圾、废弃隔离四类语义彻底分离，不再统称“回收”。
+- `flow/history/` 只保留已验收或无风险冷数据；`flow/trash/` 只保留明确废弃或验证过程垃圾。
+
+### Verification
+- `py_compile`、审计、布局迁移、路由、预算、门禁、交付卡和结构测试全部 Exit 0。

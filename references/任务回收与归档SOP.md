@@ -1,6 +1,34 @@
-# 任务即时物理回收与分级垃圾处理 SOP (Task Instant GC & Waste SOP)
+# 归档、垃圾回收与日志轮转 SOP
 
-> 解决 Agent 历史包袱过重、上下文注意力被旧任务劫持的根本机制：**按需分类、双轨回收、活跃区物理零留存！**
+> 解决 Agent 历史包袱过重、上下文注意力被旧任务劫持的根本机制：**任务归档、验证垃圾、日志轮转、废弃隔离四类对象分离，活跃区物理零留存。**
+
+---
+
+## 0. 四区模型与术语
+
+不要把四类不同生命周期的对象统称为“回收”：
+
+| 术语 | 对象 | 目标目录 | 是否代表验收通过 |
+|---|---|---|---|
+| Task Archive | 已完成计划、已验收任务卡 | `flow/history/plans/`、`flow/history/tasks/` | 是 |
+| Log Rotation | 过长进展日志 | `flow/history/progress/` | 否 |
+| Verification GC | 验证临时目录、测试输出、探测日志 | `flow/trash/verification/` | 否 |
+| Deprecated Trash | 用户明确废弃的方案、任务、草稿 | `flow/trash/deprecated/` | 否 |
+
+```text
+flow/
+├── history/
+│   ├── plans/       已验收计划
+│   ├── tasks/       已验收任务卡
+│   └── progress/    滚动进展日志
+├── trash/
+│   ├── deprecated/  用户明确废弃
+│   └── verification/ 验证过程垃圾
+└── gc/
+    └── receipts/    归档与垃圾回收回执
+```
+
+`history/` 只表示可追溯的已验收历史；`trash/` 只表示明确废弃或验证过程垃圾。两者禁止混用。
 
 ---
 
@@ -27,16 +55,16 @@
                                              │
                      ┌───────────────────────┴───────────────────────┐
                      ▼                                               ▼
-         【类型一：自动回收 (Automated GC)】              【类型二：人工确认回收 (Human Confirmation GC)】
-         · 触发对象: 进展日志轮转 / 临时中间产物            · 触发对象: 业务功能 / 核心交付物 / 任务卡
-         · 机制: 超阈值自动切除沉淀至 history/            · 机制: 必须先挂起为 [-] 待验收并提请验收，
-         · 零人工干预，保持活跃区轻量                    · 用户显式确认合格 [✓] 后方可执行物理剪切
+         【自动处理：Log Rotation / Verification GC】       【人工确认：Task Archive / Deprecated Trash】
+         · 对象: 进展日志 / 临时中间产物                     · 对象: 交付任务 / 废弃方案
+         · 去向: history/progress、trash/verification       · 去向: history/plans|tasks、trash/deprecated
+         · 零人工干预，保持活跃区轻量                        · 必须先验收或明确废弃后才能移动
 ```
 
 ### 2.1 类型一：自动回收 (Automated GC)
 - **适用场景**：
-  1. **进展日志滚动轮转 (Log Rotation)**：`flow/进展.md` 活跃区默认**仅保留最新 3~5 条记录**。当新增第 6 条交接记录时，系统/Agent 自动将第 6 条及更早的历史记录剪切归档沉淀至 `flow/history/进展_YYYYMM.md`；
-  2. **临时探测与中间垃圾清理**：在执行调试、临时测试断言、临时中间脚本时，执行完毕后自动移入 `flow/trash/` 或清理，严禁残留堆积在根目录。
+  1. **进展日志滚动轮转 (Log Rotation)**：`flow/进展.md` 活跃区默认**仅保留最新 3~5 条记录**。当新增第 6 条交接记录时，自动将旧记录剪切沉淀至 `flow/history/progress/进展_YYYYMM.md`；
+  2. **验证垃圾回收 (Verification GC)**：执行调试、临时测试或探测产生的白名单临时目录，自动移入 `flow/trash/verification/`，严禁残留堆积在根目录。
 - **特征**：全自动静默执行，无需用户确认，确保上下文始终轻量。
 
 ### 2.2 类型二：人工确认回收 (Human Confirmation GC)
@@ -67,19 +95,30 @@
             └────────────────────────┘  └────────────────────────┘
 ```
 
-### 3.1 历史归档库 (`flow/history/`) —— 可溯源的冷备份
+### 3.1 历史归档库 (`flow/history/`) —— 已验收冷备份
 - **存放内容**：
-  - `flow/history/plan_YYYYMMDD_<阶段>.md`：已完结的阶段性计划；
+  - `flow/history/plans/<plan-id>.md`：已完结的阶段性计划；
   - `flow/history/tasks/`：已完成并验收的实体任务卡；
-  - `flow/history/进展_YYYYMM.md`：滚动轮转出的历史进展日志。
+  - `flow/history/progress/进展_YYYYMM.md`：滚动轮转出的历史进展日志。
 - **调度准则**：仅供日后复盘追溯。Agent 开工时**默认绝不加载**，彻底切断历史文本对模型注意力的干扰。
 
-### 3.2 废弃垃圾堆 (`flow/trash/`) —— 彻底阻断的废料区
-- **存放内容**：
-  - 用户在开发过程中明确判定“方向错误、废弃此方案、推翻重构”的无效设计、废弃草稿、废弃任务卡或废弃脚本。
+### 3.2 隔离区 (`flow/trash/`) —— 明确废弃与验证垃圾
+- `flow/trash/deprecated/`：用户明确判定“方向错误、废弃此方案、推翻重构”的无效设计、废弃草稿、废弃任务卡或废弃脚本；
+- `flow/trash/verification/`：验证临时目录、测试输出、探测日志等过程垃圾。
 - **调度准则**：
-  - 物理移动至 `flow/trash/` 并打上 `[TRASHED]` 标记；
+  - 废弃方案移动至 `flow/trash/deprecated/` 并打上 `[TRASHED]` 标记；
+  - 验证垃圾按时间戳移动至 `flow/trash/verification/`；
   - **绝对隔离**：`flow/trash/` 下的所有文件严禁再次作为需求或待办读入上下文，杜绝“死灰复燃”。
+
+### 3.3 回执 (`flow/gc/receipts/`)
+
+每次任务归档、日志轮转或验证垃圾移动后，必须写入可追溯回执，至少包含：
+
+- 操作类型；
+- 源路径与目标路径；
+- 原因；
+- 验收证据或垃圾来源；
+- 时间戳。
 
 ---
 

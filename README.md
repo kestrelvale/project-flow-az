@@ -1,6 +1,6 @@
 # project-flow-az
 
-> 基于开源协作框架深度魔改的 **AI 多 Agent 协作与任务闭环管理体系（V4.8.4 待办与回收治理版）**。
+> 基于开源协作框架深度魔改的 **AI 多 Agent 协作与任务闭环管理体系（V4.9.0 四区归档治理版）**。
 > 彻底解决“历史任务死循环复读、缺乏即时回收机制、上下文全量污染、旧计划绑架当面指令、流程管理漂移、ASCII 排版错乱”等工程治理弊端。兼容 `project-flow-az` 与 `project-flow-cy` 双别名触发。
 
 把任何项目（代码 / 调研 / 内容 / 方案）当 repo 管的一套 **企业级 AI 多 Agent 协作流程与闭环状态机**。
@@ -28,6 +28,7 @@
 - **开工状态与收工看板分离**：开工只报当前焦点、路由阻塞、未纳管遗留、待验收计数、待人工决策和回收建议；待验收、归档、本轮决策只在收工阶段输出。
 - **会话预算门禁**：读取真实 session token、缓存、轮次和工具调用数据；WARN/STOP 时给出可复制的新会话接力提示词。
 - **接管失败显式化**：cwd 不在任何已接入项目内时，入口明确报告“未接管”并返回非零，不再静默成功。
+- **四区归档治理**：任务归档、日志轮转、验证垃圾、废弃隔离四类对象分离，所有移动写入 `flow/gc/receipts/` 回执。
 
 它不处理具体业务内容。业务方案、代码、调研、设计稿仍由对应项目和对应 Agent 完成；`project-flow-az` 只负责把协作方式、状态机闭环与交接结构立起来。
 
@@ -263,7 +264,7 @@ skill 会在 `flow/进展.md` 顶部追加一条记录，字段包括：
 | 路径 | 作用 |
 |---|---|
 | `SKILL.md` | skill 入口，定义触发、四状态机与核心操作 |
-| `VERSION` | 全局规范版本号 (当前 v4.8.4) |
+| `VERSION` | 全局规范版本号 (当前 v4.9.0) |
 | `LICENSE` / `NOTICE` | 开源许可证说明 |
 | `references/自动版本接管与无感热更新SOP.md` | 全局 Skill 自动比对与项目平滑热升级规范 |
 | `references/任务状态机与按需加载SOP.md` | 任务四状态机、智能标签看板、按需加载与决策升级门 |
@@ -280,7 +281,7 @@ skill 会在 `flow/进展.md` 顶部追加一条记录，字段包括：
 | `references/会话预算与接力SOP.md` | 上下文、轮次和工具调用的预算门禁与新会话接力 |
 | `scripts/flow-boot.py` | 开工入口：定位项目、热同步、审计、路由、状态汇总与预算门禁 |
 | `scripts/audit-flow.py` | 只读检查四状态机、旧格式计划与遗留任务 |
-| `scripts/flow-gc.py` | 安全回收白名单验证临时物并滚动归档过长进展 |
+| `scripts/flow-gc.py` | Verification GC 与日志滚动：验证垃圾进入 `trash/verification/`，过长进展进入 `history/progress/` |
 | `scripts/flow-gate.py` | Plan / Execute / Review / Handoff 任务卡阶段门禁 |
 | `scripts/flow-budget.py` | 读取真实会话 token、缓存、轮次和工具调用，输出 WARN/STOP 与接力提示词 |
 | `scripts/flow-deliver.py` | 生成收工交付验收卡：改动、边界、验证命令、证据和 Given-When-Then |
