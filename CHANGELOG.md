@@ -231,3 +231,13 @@ All notable changes to `project-flow-az` will be documented in this file.
 
 ### Verification
 - `py_compile`、审计、布局迁移、路由、预算、门禁、交付卡和结构测试全部 Exit 0。
+## [4.9.1] - 2026-09-20 (收工看板强制输出版)
+
+### Fixed
+- 修复任务完成后只写“flow 状态”摘要、不输出任务看板的问题。
+- `flow-deliver.py` 现在同时生成完整四状态任务看板和交付验收卡。
+- 项目/全局合同要求收工必须运行 `flow-deliver.py` 并原样粘贴输出，禁止用辅助状态摘要替代看板。
+
+### Verification
+- 交付卡测试、路由、预算、门禁、审计、归档布局和结构测试全部 Exit 0。
+- 以 `zhengjie-hrm` 真实任务卡演练，输出包含 P1-2 当前待办、P1-1 待验收和完整交付验收卡。

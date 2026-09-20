@@ -1,6 +1,6 @@
 # project-flow-az
 
-> 基于开源协作框架深度魔改的 **AI 多 Agent 协作与任务闭环管理体系（V4.9.0 四区归档治理版）**。
+> 基于开源协作框架深度魔改的 **AI 多 Agent 协作与任务闭环管理体系（V4.9.1 收工看板强制输出版）**。
 > 彻底解决“历史任务死循环复读、缺乏即时回收机制、上下文全量污染、旧计划绑架当面指令、流程管理漂移、ASCII 排版错乱”等工程治理弊端。兼容 `project-flow-az` 与 `project-flow-cy` 双别名触发。
 
 把任何项目（代码 / 调研 / 内容 / 方案）当 repo 管的一套 **企业级 AI 多 Agent 协作流程与闭环状态机**。
@@ -264,7 +264,7 @@ skill 会在 `flow/进展.md` 顶部追加一条记录，字段包括：
 | 路径 | 作用 |
 |---|---|
 | `SKILL.md` | skill 入口，定义触发、四状态机与核心操作 |
-| `VERSION` | 全局规范版本号 (当前 v4.9.0) |
+| `VERSION` | 全局规范版本号 (当前 v4.9.1) |
 | `LICENSE` / `NOTICE` | 开源许可证说明 |
 | `references/自动版本接管与无感热更新SOP.md` | 全局 Skill 自动比对与项目平滑热升级规范 |
 | `references/任务状态机与按需加载SOP.md` | 任务四状态机、智能标签看板、按需加载与决策升级门 |
@@ -284,7 +284,7 @@ skill 会在 `flow/进展.md` 顶部追加一条记录，字段包括：
 | `scripts/flow-gc.py` | Verification GC 与日志滚动：验证垃圾进入 `trash/verification/`，过长进展进入 `history/progress/` |
 | `scripts/flow-gate.py` | Plan / Execute / Review / Handoff 任务卡阶段门禁 |
 | `scripts/flow-budget.py` | 读取真实会话 token、缓存、轮次和工具调用，输出 WARN/STOP 与接力提示词 |
-| `scripts/flow-deliver.py` | 生成收工交付验收卡：改动、边界、验证命令、证据和 Given-When-Then |
+| `scripts/flow-deliver.py` | 生成完整四状态看板与交付验收卡：当前待办、待验收、边界、验证证据和 Given-When-Then |
 | `assets/templates/` | 注入项目的模板文件 |
 | `assets/templates/MODULE_AGENTS.md` | 子项目局部规则入口模板 |
 | `evals/evals.json` | 单仓、多独立仓库、非破坏接入与运行时合同行为用例 |

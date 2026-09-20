@@ -44,6 +44,26 @@ def main() -> None:
         assert "[-] 待人工验收" in output, output
         missing_changed = module.render(module.parse_card(card), changed="", evidence="")
         assert "未提供；不得以 write_whitelist 冒充实际改动" in missing_changed, missing_changed
+
+        plan = Path(tmp) / "plan.md"
+        plan.write_text(
+            "\n".join(
+                [
+                    "## 🎯 当前聚焦待办 (P0)",
+                    "- [ ] P1-2 后续任务",
+                    "## ⏳ 待人工验收",
+                    "- [-] T-1 修正登录失效 [🤖 Exit 0][👤 待人工验收]",
+                    "## 📦 已完结归档",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        report = module.render_plan_sections(plan) + "\n" + output
+        assert "### 📊 任务状态看板" in report, report
+        assert "## 🎯 当前聚焦待办 (P0)" in report, report
+        assert "## ⏳ 待人工验收" in report, report
+        assert "P1-2 后续任务" in report, report
+        assert "project-flow 交付验收卡" in report, report
     print("PASS: flow-deliver emits a complete acceptance card")
 
 
