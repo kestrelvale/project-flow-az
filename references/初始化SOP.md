@@ -7,7 +7,7 @@
 ## 原则
 - 新项目全量铺开;**已有项目非破坏合并**(缺啥补啥,不覆盖)。
 - **幂等**:可重复跑,不产生重复或破坏。
-- **一个项目边界一个控制面**:单仓多子项目只建一套根级 `flow/`、`docs/` 和 hook;子项目不机械复制控制层。
+- **一个项目边界一个控制面**:单仓多子项目只建一套根级 `flow/` 与 `docs/`;子项目不机械复制控制层。
 - **文档默认集中**:跨模块和需要统一查找的文档进入根级 `docs/`;不搬动已有 README、生成文档或必须紧贴代码的说明。
 - 动手前先列「将创建 / 修改清单」给用户确认(同 `文档维护SOP.md` 的提议 → 确认 → 写入)。
 - 已有 JSON 配置用结构化方式合并;不能安全合并时,只生成建议文件并请用户确认,不硬改。
@@ -27,11 +27,8 @@
 6. **单仓多子项目的局部入口**:
    - 每个有独立职责的子项目从 `templates/MODULE_AGENTS.md` 生成 `<module>/AGENTS.md`,替换项目名、子项目路径和根级相对路径占位符。
    - 在同目录建立 `CLAUDE.md -> AGENTS.md`(Windows 改复制)。局部入口只写本模块职责、命令、约束和根级指针。
-   - 不在子项目重复创建 `flow/`、`docs/`、`.hooks/`、`.claude/`、`.codex/`;不移动已有局部文档。根级 `docs/README.md` 对保留在模块内的文档加索引。
-7. **装根级 hook**:复制 `.hooks/stop-doccheck.sh` → `chmod +x` → 写根级 `.claude/settings.json` 与 `.codex/hooks.json`。
-   - 读取实际 `codex --version`:可解析且不低于 `0.145.0` 时启用单次自动续跑;更旧或未知版本由脚本安全放行。`0.144.1` 是已知不兼容版本,应先升级。
-   - Codex 当前 `features.hooks` 默认 true;检测有效状态,若被关才**提醒用户**开(或 `--enable hooks`),**不擅自改全局 `~/.codex/config.toml`**。
-   - 提醒:Codex 项目级 `.codex/` 层需项目 trust,且需 `/hooks` 审核批准。〔细节见 `hook机制.md`〕
+   - 不在子项目重复创建 `flow/`、`docs/` 或任何 Hook 配置;不移动已有局部文档。根级 `docs/README.md` 对保留在模块内的文档加索引。
+7. **不安装 Hook**:project-flow 只创建 `flow/` 与 `docs/` 控制面；收工检查由主控 Agent 主动完成，需要定时执行时另行配置外部 automation。
 8. **方法论详规随项目**:把 7 份详规复制进根级 `flow/规范/`(自包含)。〔或改为引用中心版——待定 #3〕
 
 ## 已有项目的非破坏合并细则
@@ -40,8 +37,7 @@
 - `CLAUDE.md`:不存在则软链到 `AGENTS.md`;已是正确软链则跳过;若已存在且不是该软链,列为冲突项请用户确认,不要覆盖。
 - 子项目局部入口遵守同一规则:已有 `<module>/AGENTS.md` 就只维护明确标记的 project-flow 块;已有 `<module>/CLAUDE.md` 且不是正确软链时列为冲突项。不要把根级 `AGENTS.md` 全文复制进模块。
 - 已有子项目 `docs/`、README 或其他说明不迁移、不删除。需要统一发现时,只提议在根级 `docs/README.md` 增加索引;已有索引块只更新块内内容。
-- `.hooks/stop-doccheck.sh`:不存在则复制;存在则先比对内容,确认它就是旧版 project-flow 脚本时更新,否则生成 `.hooks/stop-doccheck.project-flow-cy.new.sh` 并请用户确认。
-- `.claude/settings.json` 与 `.codex/hooks.json`:不存在则复制;存在则只补 `Stop` 事件下本脚本的 command handler,保留其他 hook。若 JSON 解析失败或结构不明,生成 `.project-flow-cy.suggested.*.json` 并请用户确认。
+- `.hooks/`、`.claude/settings.json` 与 `.codex/hooks.json` 不由 project-flow 创建、修改或删除；已有用户配置保持原样。
 - `flow/规范/`:可覆盖更新这 6 份方法论副本,因为它们是 skill 注入的规范副本;覆盖前仍在清单里说明。
 
 ## 接入自检(跑完逐项核对)
@@ -50,11 +46,7 @@
 - [ ] `AGENTS.md` 存在;读 `CLAUDE.md` = `AGENTS.md`(软链解析正确)
 - [ ] AGENTS.md 里有:目录地图 + 开工/收工 + 核心约束 + 详规指针
 - [ ] 每个有独立职责的子项目都有局部 `AGENTS.md` 与同源 `CLAUDE.md`;根级相对路径均可解析
-- [ ] 子项目没有新增重复的 `flow/`、`docs/` 或 hook;保留在模块内的文档已从根级 `docs/README.md` 索引
+- [ ] 子项目没有新增重复的 `flow/`、`docs/` 或 Hook 配置;保留在模块内的文档已从根级 `docs/README.md` 索引
 - [ ] (若有设计工作)`DESIGN.md` 存在
-- [ ] 在 `project-flow-cy` Skill 源码目录运行 `bash tests/test-stop-hook.sh`;确认目标项目 `.hooks/stop-doccheck.sh` 可执行:Claude 只按 `prompt_id`、兼容的 Codex 只按 `turn_id` 界定回合,首次 Stop 输出 `decision:block`,同一 scope 的 active 或重复 Stop 输出 `continue:true`;错误字段、旧版、未知版本、非法输入和缺少专属稳定 ID 时安全放行
-- [ ] Codex 客户端升级或改动 continuation 机制后,按需显式运行 `PROJECT_FLOW_RUN_CODEX_TUI_E2E=1 bash tests/test-codex-stop-hook-e2e.sh`,验证首次续跑、同会话继续、退出恢复、`msg_` ID 与 `invalid_id_prefix`
-- [ ] `.claude/settings.json`、`.codex/hooks.json` 已写
-- [ ] Codex 项目已 trust;`features.hooks` 未被关闭;`/hooks` 已批准
 - [ ] 根级 `flow/规范/` 下 7 份详规齐
 - [ ] `flow/charter.md` 已开始填

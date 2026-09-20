@@ -18,6 +18,19 @@
 - **构建 / 运行**:<命令>
 - **关键配置**:<路径>
 
+## 模块级接管与交接
+
+- 在本模块目录开工时，先运行根级入口：
+
+  ```bash
+  python3 ~/.codex/skills/project-flow-az/scripts/flow-boot.py . --intent "<本轮任务摘要>"
+  ```
+
+- 根级路由决定当前焦点；本模块只能读取 `<ROOT_FLOW_PATH>/tasks/<module>/` 中与本轮相关的任务卡。
+- 预算 WARN/STOP 由根级 `flow-budget.py` 统一判断；模块不另建会话计数器。
+- 接力记录只写根级 `<ROOT_FLOW_PATH>/进展.md` 顶部；本模块不另建 `flow/`、`进展.md` 或交接文件。
+- 交接给新会话时，使用 `flow-budget.py` 输出的接力提示词，并明确本模块写入白名单。
+
 ## 局部约束
 
 - 这里只记录本模块非显而易见的心智模型、内部约定、禁区和模块级踩坑。

@@ -1,14 +1,14 @@
 ---
 name: project-flow-az
-description: "生产级战略驱动设计多 Agent 协作工作流 (V4.1.0 活态协同与弹性决胜版)。融合奥卡姆剃刀、Ask-Matt (Smart Zone/单票独立会话)、孙子兵法 (兵贵神速/避实击虚) 与矛盾论 (主要矛盾第一/代码落地优先) 四大哲学内核."
+description: "生产级战略驱动设计多 Agent 协作工作流 (V4.8.4 待办与回收治理版)。融合奥卡姆剃刀、Ask-Matt (Smart Zone/单票独立会话)、孙子兵法 (兵贵神速/避实击虚) 与矛盾论 (主要矛盾第一/代码落地优先) 四大哲学内核."
 ---
 
-# project-flow-az (生产级战略驱动设计 V4.1.0 活态协同与弹性决胜版)
+# project-flow-az (生产级战略驱动设计 V4.8.4 待办与回收治理版)
 
 把任何项目(代码 / 调研 / 内容 / 方案)按清晰的**四大哲学支柱（奥卡姆剃刀/Ask-Matt/孙子兵法/矛盾论）与四大先进驱动设计流水线（SDD ➔ TDD ➔ ATDD ➔ BDD）**来管理。
 **上下文落进文件，Agent 之间靠 `flow/`、`docs/` 异步接力，跨模型评审做质量门。彻底杜绝历史任务反复加载、杜绝上下文爆炸截断、杜绝过度探查死循环、杜绝以文代码假完工。**
 
-- 完整方法论详规在 `references/`(`工作流程.md` / `任务状态机与按需加载SOP.md` / `Sub-Agent多Agent并行协作SOP.md` / `任务回收与归档SOP.md` / `自动版本接管与无感热更新SOP.md` / `多子项目结构.md` / `文档维护SOP.md` / `DESIGN维护SOP.md` / `hook机制.md` / `初始化SOP.md`)。
+- 完整方法论详规在 `references/`(`工作流程.md` / `任务状态机与按需加载SOP.md` / `Sub-Agent多Agent并行协作SOP.md` / `任务回收与归档SOP.md` / `自动版本接管与无感热更新SOP.md` / `多子项目结构.md` / `文档维护SOP.md` / `DESIGN维护SOP.md` / `计划模式交接SOP.md` / `驱动模式与验证策略.md` / `hook机制.md` / `初始化SOP.md`)。
 - 注入项目的模板实体在 `assets/templates/`。
 
 ## 先判断用户要哪个操作
@@ -135,7 +135,7 @@ description: "生产级战略驱动设计多 Agent 协作工作流 (V4.1.0 活�
    - **子 Agent 严禁读写 `flow/` 目录**，完工后向主控交付 `files_modified` 与测试结论；
 3. **代码落地与收工自检双重硬门禁 (Execution Completeness Gate)**:
    - **禁止文档代代码**：功能类任务必须以实体代码落盘与测试通过为完结依据；
-   - **自检反查拦截**：收到 Stop Hook `【收工自检】` 时，强制反查子要点与 Sub-Agent 完工状态，有未完成项必须立即继续编码，彻底杜绝半路偷懒收工！
+   - **自检反查拦截**：准备收工时，主控 Agent 主动反查子要点与 Sub-Agent 完工状态；有未完成项必须继续编码，彻底杜绝半路偷懒收工！
 4. **双引擎自适应降级 (Dual-Engine Fallback)**:
    - 当运行环境支持 `spawn_agent` 时，自动走原生沙箱并发；
    - 当上游中继未开放 multi-agent 原生接口时，自动无感降级为 Side Chat 模式（建议用户在侧边栏开 2~3 个独立 Task 线程并行执行）或主控严格切片动态销账模式，保证在任何环境下均能稳定闭环！
@@ -148,19 +148,24 @@ description: "生产级战略驱动设计多 Agent 协作工作流 (V4.1.0 活�
 1. **单票独立会话原则 (One-Ticket-One-Session)**:
    - 复杂多模块任务拆为独立 Ticket 分会话执行，每个 Ticket 做完落盘并自测后，该会话上下文即废弃 (Disposable Context)；
    - 下一个 Ticket 开启全新会话，读取顶部最新 1 条接力棒，**永远保持在 5k ~ 20k Token 黄金 Smart Zone 内作业**。
-2. **Hook 自动记轮与阈值熔断**:
-   - `stop-doccheck.sh` 内置会话轮次计数器，当检测到单会话交互达 8~10 轮时，自动向自检 Prompt 注入接力预警；
-   - Agent 必须在第一屏或收尾汇报中显式提示用户：“当前会话已达临界区，成果已落盘，请开新会话读取接力棒推进！”
+2. **主动接力与阈值熔断**:
+   - 主控 Agent 根据上下文长度、工具调用数量和任务边界主动判断是否换会话；
+   - 换会话前必须将最新接力记录写入 `flow/进展.md`，并提示用户读取顶部记录继续。
+3. **Gemini 零缓存中转硬熔断红线 (Gemini Zero-Cache Hard Ceiling)**:
+   - **触发前提**: 当调用模型包含 `gemini` 时（如 `gemini-3.8-flash-high`、`gemini-3.7-flash-high` 等走中转路由链路）。因当前上游中转链路缓存命中率实测为 0%，长会话全量重复计费导致费用呈 10~12 倍暴增；
+   - **硬上限红线**: 单会话交互轮次 **严格 ≤ 25 轮**、累计上下文 **严格 < 10 万 Tokens**、单任务工具调用 **严格禁止超过 100 次**；
+   - **超限阻断行为**: 一旦达到 20 轮或估算上下文接近 10 万 Tokens，**必须立即停止推进新的实现代码**，将当前阶段成果落盘至真实文件，向 `flow/进展.md` 追加最新接力记录，并在当前回复第一屏强制输出【会话超限熔断与接力提示词卡】，提示用户直接复制提示词、开启新会话继续执行；**严禁在已超限的 Gemini 会话中强行继续执行复杂长任务**。
 
 ---
 
 ## 核心操作
 
-### ⚡ 强制执行铁律 (Step 0: 物理热同步)
-任何时候当用户发送 `用 /project-flow(...) 接入...` 或在项目中调用 `project-flow-az` / `project-flow-cy` 时，Agent **必须首先执行以下物理同步命令**，确保目标项目本地文件与全局 Skill 规范绝对一致：
+### ⚡ 强制执行铁律 (Step 0: 开工入口)
+已接入项目在每个执行型回合的第一次工具调用必须执行：
 ```bash
-bash ~/.codex/skills/project-flow-az/scripts/flow-sync.sh .
+python3 ~/.codex/skills/project-flow-az/scripts/flow-boot.py . --intent "<本轮任务摘要>"
 ```
+该入口向上定位项目、按需热同步、执行只读审计、输出接管路由并执行会话预算门禁。必须消费活跃焦点、Plan/Execute/Handoff 路由、静默卡、“本轮意图未登记”和 `flow-budget.py` 的 WARN/STOP 结果；发现 FAIL/WARN、路由阻塞、未登记任务或预算 STOP 时，先补齐 SDD 登记、落盘并写交接棒，再决定是否开新会话。`flow-sync.sh` 仅作为内部同步器，不作为开工入口。
 
 ---
 
@@ -168,7 +173,7 @@ bash ~/.codex/skills/project-flow-az/scripts/flow-sync.sh .
 把当前项目接入协作流程,产出标准结构。**完整步骤与验证清单在 `references/初始化SOP.md`。**
 1. 扫描当前目录代码入口与配置，判断单体项目、单仓多子项目还是多仓；
 2. 铺根级骨架：`flow/`(`charter.md`, `plan.md`, `进展.md`, `decisions.md`, `踩坑记录.md`, `tasks/`, `history/`, `trash/`, `规范/`) + `docs/`；
-3. 装载 `.hooks/`、`.claude/`、`.codex/` 并设置 `chmod +x .hooks/stop-doccheck.sh`；
+3. 仅装载 `flow/` 与 `docs/` 控制面，不安装项目级 Hook；
 4. 跑接入自检测试。
 
 ### 操作 B: 收工交接 (进展日志)
@@ -193,5 +198,6 @@ bash ~/.codex/skills/project-flow-az/scripts/flow-sync.sh .
 6. **代码先行 (Code-First)**: 严禁以方案报告代替代码落地，必须有实际文件修改与微测试通过。
 7. **本地先行与受控发版**: 所有问题在本地修改验证，严禁自动推线上，必须等显式发版指令。
 8. **单票独立会话与 8 轮熔断**: 复杂任务分会话推进，超 8 轮提示开新 Task 接力，防 Token 爆炸。
-9. **一个项目边界一个控制面**: 单仓多子项目只保留一套根级 `flow/`、`docs/` 和 hook，用 `assets/templates/MODULE_AGENTS.md` 生成局部入口，不在子项目机械复制。
-10. **Hook 适配规范**: Claude Code 只以 `prompt_id`、可解析版本不低于 `0.145.0` 的 Codex 只以 `turn_id` 界定用户回合。
+9. **Gemini 零缓存中转硬熔断红线**: 只要使用 Gemini 模型（中转链路 0% 缓存），必须死守 **≤25 轮、<10 万 Tokens、<100 次工具调用** 红线；超限强制禁止继续编码，落盘成果并输出接力提示词引导切换新会话。
+10. **一个项目边界一个控制面**: 单仓多子项目只保留一套根级 `flow/` 与 `docs/`，用 `assets/templates/MODULE_AGENTS.md` 生成局部入口，不在子项目机械复制。
+11. **轻量边界**: project-flow 不负责 Hook 触发与无人值守定时；定时任务必须由外部 automation 显式调用。

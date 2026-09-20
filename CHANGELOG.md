@@ -1,3 +1,125 @@
+## [4.8.4] - 2026-09-20 (待办、决策与回收治理版)
+
+### Added
+- 开工状态新增“待人工决策”和“回收建议”分区。
+- 待验收积压会明确提示逐项确认后归档或退回修复，不自动替用户验收。
+- 活跃区仍有已完成项时提示移入 `flow/history/`。
+- 开工状态恢复待验收可见性，完整列出 `[-]` 待验收项。
+
+### Fixed
+- 修复 `[-]` 未被任务正则识别，导致待验收数量错误显示为 0。
+- 修复项目外 cwd 静默返回成功的问题，现在明确报告“未接管”并返回非零。
+- 保持开工状态与收工看板分离，不在开工阶段预填验收、归档或决策。
+
+### Verification
+- `py_compile`、路由回归、预算回归、门禁回归、交付卡回归和结构测试全部 Exit 0。
+- 17 个已接入项目统一同步到 V4.8.4。
+
+## [4.8.3] - 2026-09-20 (待验收状态可见性修复)
+
+### Fixed
+- 修复开工状态待验收计数为 0 的解析缺陷：`[-]` 未纳入任务行正则。
+- 开工状态现在全量显示真实待验收项，但仍保持“只看状态、不生成收工看板”的边界。
+- 增加 `[-]` 计数回归测试。
+
+## [4.8.2] - 2026-09-20 (接管失败显式化)
+
+### Fixed
+- `flow-boot.py` 在 cwd 不属于任何已接入项目时不再静默返回成功，改为明确输出“未接管”并返回非零。
+- 开工状态新增真实 `[-]` 待验收计数，但不会生成完整收工看板或伪造验收结果。
+- 增加“项目外目录必须显式失败”的回归测试。
+
+## [4.8.1] - 2026-09-19 (开工状态与收工看板分离)
+
+### Fixed
+- `flow-boot.py` 开工时不再输出完整四状态看板，改为只读“开工状态”。
+- 开工输出不再预填“待人工验收、已完结归档、本轮决策”。
+- 完整四状态看板与交付验收卡只在收工、验证留证并准备人工验收时输出。
+- 增加开工阶段禁止出现收工字段的回归测试。
+
+## [4.8.0] - 2026-09-19 (会话预算监控与自动接力版)
+
+### Added
+- 新增 `scripts/flow-budget.py`，从 `CODEX_THREAD_ID` 对应的 Codex session jsonl 读取真实 token 用量。
+- `flow-boot.py` 每轮执行预算门禁：上下文占用 >=75% 或轮次 >=20 进入 WARN；>=90%、单次输入 >=30 万、轮次 >=25 或工具调用 >=100 进入 STOP。
+- WARN/STOP 自动输出可复制的 project-flow 接力提示词。
+- 新增《会话预算与接力SOP.md》与 `tests/test-flow-budget.py`。
+
+### Changed
+- 区分“最近一次请求上下文”与“thread 累计输入成本”，避免把 `turn_token_usage` 误当成单次上下文长度。
+- 预算 STOP 会作为 `flow-boot.py` 的失败门禁返回，禁止继续扩展实现。
+
+## [4.7.0] - 2026-09-19 (接管路由与交接卡识别版)
+
+### Added
+- `flow-boot.py` 新增 `--intent` 与接管路由输出：聚合当前聚焦任务、递归任务卡、Plan/Execute/Handoff 模式和静默卡。
+- 活跃区任务与任务卡的绑定校验，路由阻塞和“本轮意图未登记”会明确暴露。
+- 新增 `tests/test-flow-boot-routing.py`，验证 Focus/Backlog、嵌套任务卡、Intent 绑定与模式路由。
+
+### Changed
+- Handoff 卡不再被当作执行卡；非活跃的 Execute/Review 卡进入静默，不与当前焦点争抢。
+- 全局 `AGENTS.md`、`CLAUDE.md` 和项目运行时合同要求每轮首动带 `--intent` 并消费路由结果。
+
+## [4.6.2] - 2026-09-19 (任务卡占位符门禁)
+
+- `flow-gate.py` 拒绝 `<...>`、`TODO`、`TBD` 等占位字段，避免模板被误判为有效任务卡。
+- 增加门禁行为测试并接入多项目结构测试。
+
+## [4.6.1] - 2026-09-19 (Plan 术语修正版)
+
+### Fixed
+- 明确 `plant` 指 Codex Plan（计划模式），移除误导性的 PlantUML 表述。
+- 版本递增以确保已接入项目同步最新交接规范。
+
+## [4.6.0] - 2026-09-19 (全阶段门禁与 Plan 模式版)
+
+### Added
+- **安全验证 GC**：`flow-gc.py` 只处理 `flow/.tmp`、`flow/verification-tmp`、`flow/test-output`、`flow/test-results`，过长 `进展.md` 自动滚动到 `flow/history/`。
+- **任务卡门禁**：`flow-gate.py` 校验 Plan、Execute、Review、Handoff 阶段字段，`flow-boot.py` 自动检查 `flow/tasks/*.md`。
+- **Plan 模式交接**：新增《计划模式交接SOP.md》和 `flow/tasks/TEMPLATE.md`。
+
+### Fixed
+- 将误写的 PlantUML 路由改为用户所说的 Plan 模式。
+- 禁止 GC 触碰项目根目录的任意 `tmp` 或业务目录。
+
+## [4.5.0] - 2026-09-19 (硬首动审计与遗留暴露版)
+
+### Added
+- **统一开工入口**: 新增 `scripts/flow-boot.py`，从当前目录向上定位 `flow/plan.md`，版本落后时按需热同步，随后执行只读审计。
+- **硬首动合同**: 全局 `~/.codex/AGENTS.md` 与 `~/.claude/CLAUDE.md` 要求每个执行型回合第一次工具调用运行 `flow-boot.py .`，审计问题必须先在首屏暴露。
+- **按需驱动规范**: 新增《驱动模式与验证策略.md》，按任务类型加载 SDD、TDD、ATDD、BDD 与必要的 PlantUML。
+
+### Fixed
+- **遗留审计盲区**: `audit-flow.py` 支持列表与旧版表格计划，能暴露 `ok-yudao`、`video daily`、`zhengjie-hrm` 等项目中未归档的完成项。
+
+## [4.4.0] - 2026-09-18 (AGENTS 单一合同版)
+
+### Added
+- **全局接管条款**: `~/.codex/AGENTS.md` 与 `~/.claude/CLAUDE.md` 各增加一句接管条件：工作根或父目录存在 `flow/plan.md` 即进入 project-flow 交付模式，无需用户点名 skill。
+
+### Fixed
+- **合同丢失根因**: 取证显示 `AGENTS.md` 在会话启动与文件变更时注入，zhengjie-hrm 出问题的前 3 轮注入内容确无运行时合同。根因是合同当时尚未写入项目入口，而非缺 Hook。
+- **同步覆盖范围**: 热同步只维护 `project-flow-cy:start/end` 标记块，块外项目自定义内容一律保留；17 个已接入项目合同覆盖 100%。
+
+### Removed
+- **奥卡姆剃刀去重**: 删除项目 `AGENTS.md` 中重复的行为准则四条（10 个项目共减约 11KB），行为准则只保留在全局入口一份；运行合同块由 2474B 精简至 1721B。
+- **Hook 彻底移除**: 删除用户级 `project-flow-guard.sh` 与其 `SessionStart` / `UserPromptSubmit` 挂载，恢复无 Hook 架构。
+
+## [4.3.0] - 2026-09-18 (无 Hook 轻量化运行时合同版)
+
+### Changed
+- **彻底移除 Hook 控制面**: project-flow 不再安装、同步或依赖 `.hooks/`、`.claude/settings.json`、`.codex/hooks.json`；
+- **恢复运行时合同**: 每轮首屏看板、四状态机、`plan.md` 同步、验收卡与收工进展重新写回 `assets/templates/AGENTS.md`，并由热同步按 `project-flow-cy:start/end` 标记块维护，不再整文件覆盖；
+- **同步器收窄职责**: 只维护 `flow/`、`docs/`、控制面基础文件与 `AGENTS.md` 合同块；
+- **测试切换**: 删除失效的 Stop Hook 单测与 TUI E2E，改为校验无 Hook 运行时合同、模板和评测结构一致性。
+
+### Added
+- **Gemini 零缓存中转硬熔断门禁 (Gemini Zero-Cache Hard Ceiling)**:
+  - 针对 Gemini 系列中转链路实测 0% 缓存导致的 10~12 倍费用滚雪球顽疾，正式确立物理级硬熔断红线；
+  - 只要模型为 Gemini：单会话严格 ≤25 轮、累计上下文严格 <10 万 Tokens、单任务工具调用严格禁止超过 100 次；
+  - 达到临界区强制禁止继续编码，必须将当前成果物理落盘并向 `flow/进展.md` 写入接力棒；
+  - 输出标准化【开箱即用新会话接力提示词模板】，提示用户复制开启全新会话接力。
+
 ## [4.2.0] - 2026-09-17 (Delivery-First & 会话平滑接力防膨胀版)
 
 ### Added
