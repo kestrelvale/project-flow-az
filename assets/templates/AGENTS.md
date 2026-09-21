@@ -26,10 +26,13 @@
 
 ```bash
 python3 ~/.codex/skills/project-flow-az/scripts/flow-deliver.py flow/tasks/<ticket>.md \
-  --changed "<实际改动路径>" --evidence "<Exit 0 证据>"
+  --changed "<实际改动路径>" --evidence "<Exit 0 证据>" \
+  --what "<做了什么>" --why "<为什么这么做>" \
+  --understanding "<边界 / 假设>" --outputs "<产出路径>" \
+  --problem "<问题 → 怎么解决，没有可省略>" --next-step "<下一步>"
 ```
 
-并把脚本输出的 `任务状态看板` 与 `交付验收卡` 原样粘贴到回复中。禁止只写“flow 状态”摘要替代看板。
+并把脚本输出的 `任务状态看板`、`本轮工作汇报` 与 `交付验收卡` 原样粘贴到回复中。禁止只写“flow 状态”摘要，也禁止用任务看板代替工作汇报。
 
 - `[-] 待人工验收`只列本轮真实交付且已有 Exit 0 证据的任务；
 - `[✓]`只列已经从活跃区物理归档的任务；

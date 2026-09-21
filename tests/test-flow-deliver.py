@@ -59,6 +59,20 @@ def main() -> None:
             encoding="utf-8",
         )
         report = module.render_plan_sections(plan) + "\n" + output
+        summary = module.render_work_summary(
+            what="修正登录失效",
+            why="旧逻辑遗漏续期",
+            understanding="仅影响鉴权链路",
+            outputs="src/auth.ts,tests/auth.test.ts",
+            problem="无",
+            next_step="提交人工验收",
+        )
+        assert "### 📝 本轮工作汇报" in summary, summary
+        assert "- 做了什么：修正登录失效" in summary, summary
+        assert "- 为什么这么做：旧逻辑遗漏续期" in summary, summary
+        assert "- 怎么理解：仅影响鉴权链路" in summary, summary
+        assert "- 产出路径：src/auth.ts,tests/auth.test.ts" in summary, summary
+        assert "- 下一步：提交人工验收" in summary, summary
         assert "### 📊 任务状态看板" in report, report
         assert "## 🎯 当前聚焦待办 (P0)" in report, report
         assert "## ⏳ 待人工验收" in report, report
