@@ -41,7 +41,8 @@ def parse_card(path: Path) -> dict[str, str]:
     def flush() -> None:
         if current is None:
             return
-        joined = " ".join(part.strip() for part in block if part.strip())
+        # 用换行连接，保留多行路径清单；单行命令字段后续自行 strip。
+        joined = "\n".join(part.strip() for part in block if part.strip())
         values[current] = joined or values.get(current, "")
 
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():

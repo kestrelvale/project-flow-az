@@ -165,6 +165,48 @@ def main() -> None:
         )
         assert "已终结内容应物理剪切到 flow/history/" in bloated.stdout, bloated.stdout
 
+        # 并行任务白名单重叠必须在路由阻塞中拦出，避免两个执行体互相覆盖。
+        (flow / "plan.md").write_text(
+            "\n".join(
+                [
+                    "# Plan",
+                    "## 当前聚焦待办 (P0)",
+                    "- [ ] P0-1 [登录状态修复] 修正登录失效",
+                    "- [ ] P0-8 [鉴权中间件] 调整鉴权中间件",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (tasks / "P0-8-authz.md").write_text(
+            "\n".join(
+                [
+                    "ticket_id: P0-8",
+                    "goal: 调整鉴权中间件",
+                    "mode: execute",
+                    "method: TDD",
+                    "write_whitelist: src/auth.ts,tests/auth.test.ts",
+                    "verify_command: npm test -- auth",
+                    "acceptance: Given 有效账号，When 登录，Then 返回有效令牌",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        parallel = subprocess.run(
+            [
+                sys.executable,
+                str(BOOT),
+                str(root),
+                "--intent",
+                "登录状态修复",
+                "--skip-budget",
+            ],
+            text=True,
+            capture_output=True,
+        )
+        assert "并行冲突" in parallel.stdout, parallel.stdout
+        assert "src/auth.ts" in parallel.stdout, parallel.stdout
+        assert "P0-1" in parallel.stdout and "P0-8" in parallel.stdout, parallel.stdout
+
         unregistered = subprocess.run(
             [
                 sys.executable,

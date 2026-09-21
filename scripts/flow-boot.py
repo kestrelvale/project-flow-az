@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import re
 import subprocess
 import sys
@@ -14,6 +15,12 @@ AUDIT_SCRIPT = SKILL_DIR / "scripts" / "audit-flow.py"
 GC_SCRIPT = SKILL_DIR / "scripts" / "flow-gc.py"
 GATE_SCRIPT = SKILL_DIR / "scripts" / "flow-gate.py"
 BUDGET_SCRIPT = SKILL_DIR / "scripts" / "flow-budget.py"
+
+_GATE_SPEC = importlib.util.spec_from_file_location("flow_gate", GATE_SCRIPT)
+assert _GATE_SPEC and _GATE_SPEC.loader
+FLOW_GATE = importlib.util.module_from_spec(_GATE_SPEC)
+_GATE_SPEC.loader.exec_module(FLOW_GATE)
+
 PLAN_TASK_RE = re.compile(r"^\s*[-*]\s*\[([ \-✕xX])\]\s+(.+?)\s*$")
 CARD_KEYS = (
     "ticket_id",
@@ -46,14 +53,16 @@ def read_version(path: Path) -> str:
 
 
 def read_card(path: Path) -> dict[str, str]:
-    values: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        if ":" not in line or line.startswith(" "):
-            continue
-        key, value = line.split(":", 1)
-        if key.strip() in CARD_KEYS:
-            values[key.strip()] = value.strip()
-    return values
+    """复用 flow-gate 的解析器，避免多份实现漂移。
+
+    自研的第二份解析器不认 YAML 块标量，把 `write_whitelist: |` 读成 `|`，
+    进而让并行冲突检测产生 `| ↔ |` 假阳性。
+    """
+    return {
+        key: value
+        for key, value in FLOW_GATE.parse_card(path).items()
+        if key in CARD_KEYS
+    }
 
 
 def card_goal(card: dict[str, str]) -> str:
@@ -137,6 +146,80 @@ def read_completed_tasks(plan: Path) -> list[str]:
 
 # plan.md 里这些章节属于“已终结”，其内容应物理归档，不得长期驻留活跃控制面。
 ARCHIVED_HEADING_RE = re.compile(r"归档|Archived|已完成|已废弃|废弃任务")
+
+
+def split_paths(raw: str) -> list[str]:
+    return [
+        item.strip().rstrip("/")
+        for item in re.split(r"[,，;；\n]", raw)
+        if item.strip() and not is_control_plane(item.strip())
+    ]
+
+
+def is_control_plane(path: str) -> bool:
+    """编排器独占的控制面路径不参与并行冲突判定。
+
+    `flow/` 与 `docs/reviews/` 由主控统一写入，子 Agent 本就不该碰；
+    把它们算作冲突会让每张卡互相“重叠”，淹没真正会互相覆盖的源码。
+    """
+    normalized = path.strip().lstrip("./")
+    return normalized.startswith(("flow/", "docs/reviews/")) or normalized in {"flow", "docs/reviews"}
+
+
+def paths_overlap(left: str, right: str) -> bool:
+    """判断两个写入白名单条目是否可能落到同一文件或目录。"""
+    left, right = left.strip(), right.strip()
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    # 去掉 glob 通配后缀后比较前缀，覆盖 `src/**` 与 `src/x.py` 这类包含关系。
+    left_base = left.rstrip("*").rstrip("/")
+    right_base = right.rstrip("*").rstrip("/")
+    if not left_base or not right_base:
+        return False
+    return (
+        left_base == right_base
+        or left_base.startswith(right_base + "/")
+        or right_base.startswith(left_base + "/")
+    )
+
+
+def find_parallel_conflicts(
+    cards: list[tuple[Path, dict[str, str]]],
+    active_tasks: list[tuple[str, str]],
+) -> list[str]:
+    """暴露同一活跃区里写入白名单重叠的任务卡。
+
+    多个任务同时施工时若白名单交叉，两个执行体会互相覆盖同一文件，
+    表现为“任务串了、改动对不上”。这里在开工阶段直接拦出来。
+    """
+    active_cards = [
+        (path, card)
+        for path, card in cards
+        if card.get("mode") in {"execute", "plan"} and card_is_linked(card, active_tasks)
+    ]
+    reports: list[str] = []
+    for index, (left_path, left) in enumerate(active_cards):
+        left_id = left.get("ticket_id") or left_path.stem
+        left_paths = split_paths(left.get("write_whitelist", ""))
+        for right_path, right in active_cards[index + 1:]:
+            right_id = right.get("ticket_id") or right_path.stem
+            right_paths = split_paths(right.get("write_whitelist", ""))
+            shared = sorted(
+                {
+                    f"{a} ↔ {b}"
+                    for a in left_paths
+                    for b in right_paths
+                    if paths_overlap(a, b)
+                }
+            )
+            if shared:
+                reports.append(
+                    f"{left_id} 与 {right_id} 写入白名单重叠：{'、'.join(shared)}；"
+                    f"并行施工会互相覆盖，需拆成串行或重新划分边界。"
+                )
+    return reports
 
 
 def measure_plan_bloat(plan: Path) -> list[str]:
@@ -312,6 +395,7 @@ def render_start_status(
     completed_tasks: list[str],
     orphan_cards: list[str],
     bloat_reports: list[str],
+    parallel_conflicts: list[str],
 ) -> list[str]:
     status = ["### project-flow 开工状态", "", "## 🎯 当前聚焦待办 (P0)"]
     pending = [(state, title) for state, title in active_tasks if state in {" ", "✕", "x", "X"}]
@@ -329,7 +413,15 @@ def render_start_status(
     ]
     if blockers:
         status.extend(f"- 尚无绑定任务卡：{title}" for title in blockers)
-    else:
+    if parallel_conflicts:
+        status.append(
+            f"- 并行冲突 {len(parallel_conflicts)} 组：活跃任务写入白名单交叉，"
+            f"并行施工会互相覆盖，需拆成串行或重新划分边界。"
+        )
+        status.extend(f"  - {report}" for report in parallel_conflicts[:3])
+        if len(parallel_conflicts) > 3:
+            status.append(f"  - …另有 {len(parallel_conflicts) - 3} 组，详见 flow/tasks/ 白名单。")
+    if not blockers and not parallel_conflicts:
         status.append("- 无")
 
     status.extend(["", "## 🧹 未纳管遗留"])
@@ -481,6 +573,7 @@ def main() -> int:
 
     orphan_cards = find_orphan_cards(cards, active_tasks)
     bloat_reports = measure_plan_bloat(plan)
+    parallel_conflicts = find_parallel_conflicts(cards, active_tasks)
     print(
         "\n".join(
             render_start_status(
@@ -491,6 +584,7 @@ def main() -> int:
                 completed_tasks,
                 orphan_cards,
                 bloat_reports,
+                parallel_conflicts,
             )
         )
     )
