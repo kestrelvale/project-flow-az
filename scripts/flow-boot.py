@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
@@ -31,10 +33,92 @@ CARD_KEYS = (
     "write_whitelist",
     "verify_command",
     "acceptance",
+    "depends_on",
     "next_agent",
     "next_action",
 )
 FOCUS_HEADING_MARKERS = ("当前聚焦", "当前任务", "施工队列")
+CLAIMS_DIR = "claims"
+CLAIM_TTL_HOURS = 12
+
+
+def load_claims(flow: Path) -> dict[str, dict[str, object]]:
+    """读取 flow/claims/ 下的任务认领记录。"""
+    claims: dict[str, dict[str, object]] = {}
+    directory = flow / CLAIMS_DIR
+    if not directory.is_dir():
+        return claims
+    for path in sorted(directory.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        ticket = str(data.get("ticket_id") or path.stem)
+        claims[ticket] = data
+    return claims
+
+
+def claim_is_stale(claim: dict[str, object], now: float) -> bool:
+    try:
+        claimed_at = float(claim.get("claimed_at") or 0)
+    except (TypeError, ValueError):
+        return True
+    return (now - claimed_at) > CLAIM_TTL_HOURS * 3600
+
+
+def write_claim(flow: Path, ticket: str, thread_id: str, now: float) -> None:
+    directory = flow / CLAIMS_DIR
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{ticket}.json").write_text(
+        json.dumps(
+            {"ticket_id": ticket, "thread_id": thread_id, "claimed_at": now},
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def claim_active_tasks(
+    flow: Path,
+    cards: list[tuple[Path, dict[str, str]]],
+    active_tasks: list[tuple[str, str]],
+    thread_id: str,
+) -> list[str]:
+    """让当前会话认领本轮活跃任务，阻止另一个会话抢同一张卡。
+
+    多端并行时两个 Codex 会话可能同时读到同一批活跃任务；没有认领记录就会
+    各自施工同一张卡，表现为任务串线。认领带过期时间，避免会话崩溃后死锁。
+    """
+    if not thread_id:
+        return []
+    now = time.time()
+    claims = load_claims(flow)
+    conflicts: list[str] = []
+    owned: list[str] = []
+    for path, card in cards:
+        if card.get("mode") not in {"execute", "plan"}:
+            continue
+        if not card_is_linked(card, active_tasks):
+            continue
+        ticket = card.get("ticket_id") or path.stem
+        existing = claims.get(ticket)
+        if existing:
+            owner = str(existing.get("thread_id") or "")
+            if owner and owner != thread_id and not claim_is_stale(existing, now):
+                conflicts.append(
+                    f"{ticket} 已由会话 {owner[:8]} 认领，本会话不得并行施工；"
+                    f"等待其交付或超过 {CLAIM_TTL_HOURS} 小时过期后接管。"
+                )
+                continue
+        owned.append(ticket)
+        write_claim(flow, ticket, thread_id, now)
+    if owned:
+        conflicts.append(
+            f"本会话已认领：{'、'.join(owned)}；其他会话开工时将看到占用标记。"
+        )
+    return conflicts
 
 
 def find_project_root(start: Path) -> Path | None:
@@ -222,6 +306,48 @@ def find_parallel_conflicts(
     return reports
 
 
+def find_dependency_blockers(
+    cards: list[tuple[Path, dict[str, str]]],
+    active_tasks: list[tuple[str, str]],
+    flow: Path,
+) -> list[str]:
+    """检查活跃任务的前置依赖是否仍未交付。
+
+    多端并行常见形态是 B 端依赖 A 端的接口契约；若 B 先开工会做出无法
+    对接的实现。依赖以任务卡 `depends_on` 声明，未完成时直接拦在开工阶段。
+    """
+    done: set[str] = set()
+    history = flow / "history" / "tasks"
+    if history.is_dir():
+        for path in history.glob("*.md"):
+            done.add(path.stem)
+            for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                if line.lower().startswith("ticket_id:"):
+                    done.add(line.split(":", 1)[1].strip())
+
+    reports: list[str] = []
+    for path, card in cards:
+        if card.get("mode") not in {"execute", "plan"}:
+            continue
+        if not card_is_linked(card, active_tasks):
+            continue
+        raw = card.get("depends_on", "").strip()
+        if not raw or raw in {">", "|", "-", "无"}:
+            continue
+        ticket = card.get("ticket_id") or path.stem
+        pending = [
+            dep
+            for dep in split_paths(raw)
+            if dep and dep not in done and not (flow / "history" / "tasks" / f"{dep}.md").exists()
+        ]
+        if pending:
+            reports.append(
+                f"{ticket} 前置依赖未交付：{'、'.join(pending)}；"
+                f"完成并归档前置任务前不得开工。"
+            )
+    return reports
+
+
 def measure_plan_bloat(plan: Path) -> list[str]:
     """暴露 plan.md 里堆积的已归档/已废弃内容。
 
@@ -331,10 +457,18 @@ def route_hint(
             "Plan 路由：" + "、".join(card.get("ticket_id", path.name) for path, card in plan_cards)
             + "；项目初期阶段：只读执行 Plan / Goal / SDD 规划门，禁止修改业务代码。"
         )
+        hints.append(
+            "原生交接：Plan 路由必须调用 Codex 原生 Plan 模式做只读拆解；"
+            "任务目标用原生 goal / create_goal 登记，规划完成后转 Execute Mode。"
+        )
     if execute_cards:
         hints.append(
             "Execute 路由：" + "、".join(card.get("ticket_id", path.name) for path, card in execute_cards)
             + "；实现阶段：先写失败测试再最小实现 (TDD)，留下 Exit 0 证据。"
+        )
+        hints.append(
+            "原生交接：Execute 只做实现与 TDD，不重复规划；"
+            "SDD/TDD/ATDD/BDD 是执行要求，不是任务卡上的标签，必须有真实测试与证据。"
         )
     if review_cards:
         hints.append(
@@ -345,6 +479,10 @@ def route_hint(
         hints.append(
             "Handoff 路由：" + "、".join(card.get("ticket_id", path.name) for path, card in handoff_cards)
             + "；收尾阶段：用 BDD 的 Given-When-Then 交接下一步，不进入 Execute 队列。"
+        )
+        hints.append(
+            "原生交接：handoff 完成后用原生 goal 的 update_goal 标记目标完成，"
+            "再开新会话时由 flow-boot 重新认领。"
         )
 
     stale_cards = find_orphan_cards(cards, active_tasks)
@@ -396,6 +534,8 @@ def render_start_status(
     orphan_cards: list[str],
     bloat_reports: list[str],
     parallel_conflicts: list[str],
+    dependency_blockers: list[str],
+    claim_reports: list[str],
 ) -> list[str]:
     status = ["### project-flow 开工状态", "", "## 🎯 当前聚焦待办 (P0)"]
     pending = [(state, title) for state, title in active_tasks if state in {" ", "✕", "x", "X"}]
@@ -421,7 +561,11 @@ def render_start_status(
         status.extend(f"  - {report}" for report in parallel_conflicts[:3])
         if len(parallel_conflicts) > 3:
             status.append(f"  - …另有 {len(parallel_conflicts) - 3} 组，详见 flow/tasks/ 白名单。")
-    if not blockers and not parallel_conflicts:
+    if claim_reports:
+        status.extend(f"- {report}" for report in claim_reports)
+    if dependency_blockers:
+        status.extend(f"- {report}" for report in dependency_blockers)
+    if not blockers and not parallel_conflicts and not dependency_blockers and not claim_reports:
         status.append("- 无")
 
     status.extend(["", "## 🧹 未纳管遗留"])
@@ -574,6 +718,10 @@ def main() -> int:
     orphan_cards = find_orphan_cards(cards, active_tasks)
     bloat_reports = measure_plan_bloat(plan)
     parallel_conflicts = find_parallel_conflicts(cards, active_tasks)
+    dependency_blockers = find_dependency_blockers(cards, active_tasks, project_root / "flow")
+    claim_reports = claim_active_tasks(
+        project_root / "flow", cards, active_tasks, args.thread_id
+    )
     print(
         "\n".join(
             render_start_status(
@@ -585,6 +733,8 @@ def main() -> int:
                 orphan_cards,
                 bloat_reports,
                 parallel_conflicts,
+                dependency_blockers,
+                claim_reports,
             )
         )
     )

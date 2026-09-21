@@ -10,6 +10,7 @@ mode: plan
 method: SDD,TDD,ATDD,BDD
 scope: <输入、输出、边界和失败状态>
 write_whitelist: <允许修改的文件或目录>
+depends_on: <前置任务 ticket_id；多个用逗号分隔，无则留空或写 无>
 verify_command: <可复现的 Exit 0 验证命令>
 acceptance: <Given-When-Then 或可执行验收断言>
 evidence: <验证凭证路径，交付前填写>

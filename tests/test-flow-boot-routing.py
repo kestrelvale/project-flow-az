@@ -207,6 +207,81 @@ def main() -> None:
         assert "src/auth.ts" in parallel.stdout, parallel.stdout
         assert "P0-1" in parallel.stdout and "P0-8" in parallel.stdout, parallel.stdout
 
+        # 多端并行：同一张活跃卡被两个会话抢，后到者必须被认领记录拦住。
+        first = subprocess.run(
+            [
+                sys.executable,
+                str(BOOT),
+                str(root),
+                "--intent",
+                "登录状态修复",
+                "--thread-id",
+                "thread-owner-1111",
+                "--skip-budget",
+            ],
+            text=True,
+            capture_output=True,
+        )
+        assert "本会话已认领" in first.stdout, first.stdout
+        second = subprocess.run(
+            [
+                sys.executable,
+                str(BOOT),
+                str(root),
+                "--intent",
+                "登录状态修复",
+                "--thread-id",
+                "thread-rival-2222",
+                "--skip-budget",
+            ],
+            text=True,
+            capture_output=True,
+        )
+        assert "已由会话" in second.stdout and "不得并行施工" in second.stdout, second.stdout
+
+        # 前置依赖未交付时必须拦在开工阶段。
+        (tasks / "P0-9-dep.md").write_text(
+            "\n".join(
+                [
+                    "ticket_id: P0-9",
+                    "goal: 依赖前置的任务",
+                    "mode: execute",
+                    "method: TDD",
+                    "depends_on: P0-NOT-DONE",
+                    "write_whitelist: src/dep.ts",
+                    "verify_command: npm test",
+                    "acceptance: Given A，When B，Then C",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (flow / "plan.md").write_text(
+            "\n".join(
+                [
+                    "# Plan",
+                    "## 当前聚焦待办 (P0)",
+                    "- [ ] P0-9 [依赖任务] 依赖前置的任务",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        dep = subprocess.run(
+            [
+                sys.executable,
+                str(BOOT),
+                str(root),
+                "--intent",
+                "依赖任务",
+                "--thread-id",
+                "thread-dep-3333",
+                "--skip-budget",
+            ],
+            text=True,
+            capture_output=True,
+        )
+        assert "前置依赖未交付" in dep.stdout, dep.stdout
+        assert "P0-NOT-DONE" in dep.stdout, dep.stdout
+
         unregistered = subprocess.run(
             [
                 sys.executable,

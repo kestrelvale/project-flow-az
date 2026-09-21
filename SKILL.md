@@ -1,9 +1,9 @@
 ---
 name: project-flow-az
-description: "生产级战略驱动设计多 Agent 协作工作流 (V4.9.7 完整收工汇报版)。融合奥卡姆剃刀、Ask-Matt (Smart Zone/单票独立会话)、孙子兵法 (兵贵神速/避实击虚) 与矛盾论 (主要矛盾第一/代码落地优先) 四大哲学内核."
+description: "生产级战略驱动设计多 Agent 协作工作流 (V4.9.8 完整收工汇报版)。融合奥卡姆剃刀、Ask-Matt (Smart Zone/单票独立会话)、孙子兵法 (兵贵神速/避实击虚) 与矛盾论 (主要矛盾第一/代码落地优先) 四大哲学内核."
 ---
 
-# project-flow-az (生产级战略驱动设计 V4.9.7 完整收工汇报版)
+# project-flow-az (生产级战略驱动设计 V4.9.8 完整收工汇报版)
 
 把任何项目(代码 / 调研 / 内容 / 方案)按清晰的**四大哲学支柱（奥卡姆剃刀/Ask-Matt/孙子兵法/矛盾论）与四大先进驱动设计流水线（SDD ➔ TDD ➔ ATDD ➔ BDD）**来管理。
 **上下文落进文件，Agent 之间靠 `flow/`、`docs/` 异步接力，跨模型评审做质量门。彻底杜绝历史任务反复加载、杜绝上下文爆炸截断、杜绝过度探查死循环、杜绝以文代码假完工。**
@@ -177,6 +177,23 @@ python3 ~/.codex/skills/project-flow-az/scripts/flow-boot.py . --intent "<本轮
 | 收尾期 | - | BDD | `handoff` | Given-When-Then 描述行为，交接下一步动作 |
 
 单向流转 `plan -> execute -> review -> handoff`：任务卡以 `goal` 表达目标（旧卡兼容 `objective`），进入下一阶段只改 `mode`/`method` 并补齐该阶段必填字段，再由 `flow-gate.py --phase <阶段>` 放行。注意：本流程的 `plant` 指 Plan（计划模式），不是 PlantUML 等图示工具。
+
+#### 交给原生模式，而不是自己重造
+
+project-flow 只做**控制面与门禁**，具体推理交给 Codex 原生能力，不自己实现：
+
+| 阶段 | 交给谁 | 主控动作 |
+|---|---|---|
+| `plan` | **Codex 原生 Plan 模式 + 原生 goal** | 调用原生 Plan 模式做只读拆解；用 `create_goal` 登记任务目标；不在项目里重造规划器 |
+| `execute` | **本会话执行体** | 按 TDD 先写失败测试；`method` 字段只是要求，必须有真实失败测试与 Exit 0 证据，禁止只贴标签 |
+| `review` | **本会话 + ATDD 断言** | 用可执行验收断言复核，不重复施工 |
+| `handoff` | **原生 goal 收口** | 用 `update_goal` 标记完成；写 BDD 交接，再开新会话由 `flow-boot` 重新认领 |
+
+并行与依赖由控制面强制，不靠自觉：
+
+- **任务认领**：开工时 `flow/claims/<ticket>.json` 记录会话占用（默认 12 小时过期），其他会话抢同一张卡会被拦；
+- **白名单冲突**：活跃任务写入白名单交叉时，在「路由阻塞」拦出，禁止并行覆盖；
+- **前置依赖**：任务卡 `depends_on` 声明的前置未归档时，禁止开工。
 
 ---
 
