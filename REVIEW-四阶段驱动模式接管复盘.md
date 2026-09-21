@@ -62,7 +62,7 @@ plan -> SDD    execute -> TDD    review -> ATDD    handoff -> BDD
 `Plan 路由 / Execute 路由`，从不说"这是项目初期/实现期/验收期/收尾期该做什么"。
 于是即便门禁通过，人和模型都无法从输出确认当前处在哪一阶段、该用哪种模式。
 
-### 根因三：运行时引擎从未纳入版本控制（结构性故障）
+### 根因三：运行时引擎从未纳入版本控制（结构性故障，已修复）
 
 `.gitignore` 第 22 行有 `/scripts/`，注释写的是"防止有人在 skill 仓库里
 误跑产生的运行时输出"。但 `scripts/` 装的正是引擎本体
@@ -75,7 +75,7 @@ plan -> SDD    execute -> TDD    review -> ATDD    handoff -> BDD
 - 所有引擎改动都停留在本地工作区，不进 commit、不被备份、无法分发；
 - 本机因为 `~/.codex/skills/project-flow-az` 是软链到工作区才一直"能跑"。
 
-这是"修了很多遍却传不出去"的根本原因，建议单独决策处理。
+这是"修了很多遍却传不出去"的根本原因，已在 v4.9.3 修复（见第 5 节）。
 
 ## 4. 本次落地了什么
 
@@ -112,12 +112,45 @@ git diff --check                                       OK
 - 只有 `objective` 的旧卡：门禁 Exit 0、接管正常，历史项目不破；
 - 版本 4.2.0 的临时项目开工：热同步到 4.9.3，`AGENTS.md` 写入阶段映射。
 
-## 6. 没有达成 / 待决策
+## 6. 封板结果（v4.9.3）
 
-1. **引擎未纳入版本控制**：`.gitignore` 的 `/scripts/` 仍未移除，引擎改动
-   不会被 commit、备份或分发，新克隆依旧没有引擎。需要用户确认后再动。
-2. **Codex 原生 Goal 未接入**：本机没有可靠的原生 Goal 协议证据，
+### 引擎纳入版本控制
+
+- 移除 `.gitignore` 中的 `/scripts/`：该规则原意为防止误跑产生运行时输出，
+  但 `sync-project.py` 从不在目标项目创建 `scripts/`，属于误伤。
+- 8 个引擎脚本正式入库并补齐可执行位：
+  `flow-boot.py`、`flow-gate.py`、`flow-deliver.py`、`flow-budget.py`、
+  `flow-gc.py`、`audit-flow.py`、`sync-project.py`、`flow-sync.sh`。
+- 补齐 `*.bak_*`、`.pytest_cache/` 忽略规则，替代原来的过度忽略。
+- 新增回归测试：任一引擎脚本若再次被忽略或未入库，结构测试直接 FAIL。
+
+### 分发闭环验证
+
+```text
+全新 git clone
+  -> scripts/ 下 8 个引擎脚本齐全
+  -> 版本 4.9.3
+  -> 仓库内 tests/test-flow-gate.py、test-flow-boot-routing.py PASS
+  -> 用 clone 出来的引擎接管临时新项目：输出 Plan 路由，门禁 Exit 0
+```
+
+### 版本与提交
+
+- 提交：`860be72 fix(project-flow): release v4.9.3 with engine packaging and four-phase mode gate`
+- 标签：`v4.9.3`
+- 已热更新项目：12 个（AiMaMi-debug-bundle、easy-input-maker、ai-hardware、
+  zhengjie-hrm、ok-yudao、o2o-shopping、re-logistic、deepseek-harness、cv、
+  rentHunter、legal、video daily）全部到 4.9.3
+
+## 7. 仍未达成 / 已知边界
+
+1. **Codex 原生 Goal 未接入**：本机没有可靠的原生 Goal 协议证据，
    当前 `goal` 落实为任务卡字段与阶段语义，不代表已接入原生接口。
-3. **阶段流转靠门禁约束，不靠自动状态机**：`plan -> execute -> review -> handoff`
+2. **阶段流转靠门禁约束，不靠自动状态机**：`plan -> execute -> review -> handoff`
    是单向约定 + 门禁校验，尚未做成自动推进的状态机。
-4. **未提交、未推送**：本轮改动全部留在本地工作区。
+3. **未推送远端**：本轮已提交并打标签，但按"本地先行、零擅自外发"的合同，
+   未执行 `git push`，需要显式发版指令。
+4. **3 个历史项目仍有遗留债务**：easy-input-maker（10 张散文卡 +
+   活跃区 10 条已完成）、ai-hardware（1 张散文卡）、ok-yudao（活跃区 4 条已完成）
+   开工仍返回非零。这是审计如实暴露历史债务，不是模式逻辑故障；
+   清理会改这些项目的 `flow/`，需单独确认。
