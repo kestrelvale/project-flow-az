@@ -77,33 +77,57 @@ def render_work_summary(
     return "\n".join(lines)
 
 
+# 收工看板是固定四分区契约：标题永远存在，空分区显式写“无”。
+# 早期实现直接照抄各项目 plan.md 的自定义标题，导致标题随项目漂移、
+# 任务全部归档后整块看板变空——这正是汇报不稳定的根因。
+BOARD_SECTIONS = (
+    ("## 🎯 当前聚焦待办 (P0)", (" ", "✕", "x", "X")),
+    ("## ⏳ 待人工验收 (Pending Verification)", ("-",)),
+    ("## 📦 已完结归档 (Archived in flow/history/)", ("✓",)),
+)
+
+# 看板只收真正的决策条目，避免把 decisions.md 的章节结构当决策。
+DECISION_MARKERS = ("自动决策", "人工决策", "决策：", "决策:", "[⚡", "[⚠️")
+
+
 def render_plan_sections(plan: Path) -> str:
-    if not plan.is_file():
-        return "### 📊 任务状态看板\n\n- plan.md 不存在"
-    sections: list[tuple[str, list[tuple[str, str]]]] = []
-    heading = ""
     tasks: list[tuple[str, str]] = []
-    for line in plan.read_text(encoding="utf-8", errors="replace").splitlines():
-        if line.startswith("## "):
-            if heading or tasks:
-                sections.append((heading, tasks))
-            heading = line[3:].strip()
-            tasks = []
-            continue
-        match = STATE_RE.match(line)
-        if match:
-            tasks.append(match.groups())
-    if heading or tasks:
-        sections.append((heading, tasks))
+    if plan.is_file():
+        for line in plan.read_text(encoding="utf-8", errors="replace").splitlines():
+            match = STATE_RE.match(line)
+            if match:
+                tasks.append(match.groups())
 
     lines = ["### 📊 任务状态看板", ""]
-    for section, section_tasks in sections:
-        if not section_tasks:
-            continue
-        lines.append(f"## {section}")
-        for state, title in section_tasks:
-            lines.append(f"- [{state}] {title}")
+    for heading, states in BOARD_SECTIONS:
+        lines.append(heading)
+        matched = [f"- [{state}] {title}" for state, title in tasks if state in states]
+        if matched:
+            lines.extend(matched)
+        elif states == ("✓",):
+            archived = plan.parent / "history" / "tasks"
+            count = len(list(archived.glob("*.md"))) if archived.is_dir() else 0
+            lines.append(f"- 无（flow/history/tasks/ 已归档 {count} 张任务卡）")
+        else:
+            lines.append("- 无")
         lines.append("")
+
+    lines.append("## 💡 本轮决策记录 (Decisions)")
+    decisions = plan.parent / "decisions.md"
+    recorded: list[str] = []
+    if decisions.is_file():
+        for line in decisions.read_text(encoding="utf-8", errors="replace").splitlines():
+            stripped = line.strip()
+            if not stripped.startswith(("- ", "* ")):
+                continue
+            # decisions.md 是累计流水，含“背景/影响范围”等章节结构噪音；
+            # 看板只收带决策标签的真实条目。
+            if any(marker in stripped for marker in DECISION_MARKERS):
+                recorded.append(stripped)
+    if recorded:
+        lines.extend(recorded[-3:])
+    else:
+        lines.append("- 无")
     return "\n".join(lines).rstrip()
 
 

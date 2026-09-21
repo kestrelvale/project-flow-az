@@ -59,6 +59,20 @@ def main() -> None:
             encoding="utf-8",
         )
         report = module.render_plan_sections(plan) + "\n" + output
+        # 看板是固定四分区契约，标题与顺序不得漂移。
+        board = module.render_plan_sections(plan)
+        for heading in (
+            "## 🎯 当前聚焦待办 (P0)",
+            "## ⏳ 待人工验收 (Pending Verification)",
+            "## 📦 已完结归档 (Archived in flow/history/)",
+            "## 💡 本轮决策记录 (Decisions)",
+        ):
+            assert heading in board, (heading, board)
+        assert board.index("## 🎯 当前聚焦待办 (P0)") < board.index(
+            "## ⏳ 待人工验收 (Pending Verification)"
+        ) < board.index("## 📦 已完结归档 (Archived in flow/history/)") < board.index(
+            "## 💡 本轮决策记录 (Decisions)"
+        ), board
         summary = module.render_work_summary(
             what="修正登录失效",
             why="旧逻辑遗漏续期",
@@ -113,6 +127,23 @@ def main() -> None:
         archived_report = module.render_plan_sections(module.locate_plan(archived))
         assert "plan.md 不存在" not in archived_report, archived_report
         assert "P1-2 后续任务" in archived_report, archived_report
+
+        # 任务全部归档、plan.md 无任务行时，四分区仍必须完整输出，不能变空。
+        empty = Path(tmp) / "empty-flow"
+        (empty / "tasks").mkdir(parents=True, exist_ok=True)
+        (empty / "history" / "tasks").mkdir(parents=True, exist_ok=True)
+        (empty / "history" / "tasks" / "A.md").write_text("archived", encoding="utf-8")
+        (empty / "plan.md").write_text("# 计划\n\n> 当前无活跃任务。\n", encoding="utf-8")
+        empty_board = module.render_plan_sections(empty / "plan.md")
+        assert "任务状态看板" in empty_board, empty_board
+        assert "## 🎯 当前聚焦待办 (P0)" in empty_board and "- 无" in empty_board, empty_board
+        assert "已归档 1 张任务卡" in empty_board, empty_board
+        assert "## 💡 本轮决策记录 (Decisions)" in empty_board, empty_board
+
+        # plan.md 不存在时也必须给出完整四分区，而非单行报错。
+        missing_board = module.render_plan_sections(Path(tmp) / "nope" / "plan.md")
+        assert "## 🎯 当前聚焦待办 (P0)" in missing_board, missing_board
+        assert "## 💡 本轮决策记录 (Decisions)" in missing_board, missing_board
 
     print("PASS: flow-deliver emits a complete acceptance card")
 
