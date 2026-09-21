@@ -138,6 +138,33 @@ def main() -> None:
         assert "## 📦 已完结归档" not in boot.stdout, boot.stdout
         assert "## 💡 本轮决策" not in boot.stdout, boot.stdout
 
+        # plan.md 归档区堆积超过阈值时，必须在回收建议里暴露，避免静默膨胀。
+        (flow / "plan.md").write_text(
+            "\n".join(
+                [
+                    "# Plan",
+                    "## 当前聚焦待办 (P0)",
+                    "- [ ] P0-1 [登录状态修复] 修正登录失效",
+                    "## 📦 本阶段已完成归档 (Archived)",
+                    *[f"- 已归档历史条目 {i} " + "补" * 60 for i in range(20)],
+                ]
+            ),
+            encoding="utf-8",
+        )
+        bloated = subprocess.run(
+            [
+                sys.executable,
+                str(BOOT),
+                str(root),
+                "--intent",
+                "登录状态修复",
+                "--skip-budget",
+            ],
+            text=True,
+            capture_output=True,
+        )
+        assert "已终结内容应物理剪切到 flow/history/" in bloated.stdout, bloated.stdout
+
         unregistered = subprocess.run(
             [
                 sys.executable,

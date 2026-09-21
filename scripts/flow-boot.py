@@ -135,6 +135,52 @@ def read_completed_tasks(plan: Path) -> list[str]:
     ]
 
 
+# plan.md 里这些章节属于“已终结”，其内容应物理归档，不得长期驻留活跃控制面。
+ARCHIVED_HEADING_RE = re.compile(r"归档|Archived|已完成|已废弃|废弃任务")
+
+
+def measure_plan_bloat(plan: Path) -> list[str]:
+    """暴露 plan.md 里堆积的已归档/已废弃内容。
+
+    历史实现只在归档区写裸 `-` 列表项，状态正则识别不到，于是这些
+    已终结内容会静静堆在活跃控制面里，开工时反复注入上下文造成漂移。
+    这里按章节体积直接度量，不依赖状态标记。
+    """
+    if not plan.is_file():
+        return []
+    total = len(plan.read_text(encoding="utf-8", errors="replace"))
+    if total == 0:
+        return []
+    reports: list[str] = []
+    current = ""
+    size = 0
+    sections: list[tuple[str, int]] = []
+
+    def flush() -> None:
+        if current and size:
+            sections.append((current, size))
+
+    for line in plan.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True):
+        if line.startswith("## "):
+            flush()
+            current = line[3:].strip()
+            size = len(line)
+            continue
+        size += len(line)
+    flush()
+
+    for title, section_size in sections:
+        if not ARCHIVED_HEADING_RE.search(title):
+            continue
+        share = section_size * 100 // total
+        if share >= 25:
+            reports.append(
+                f"plan.md「{title}」占全文 {share}%（{section_size}/{total} 字节）："
+                f"已终结内容应物理剪切到 flow/history/，活跃控制面只留指针。"
+            )
+    return reports
+
+
 def card_is_linked(card: dict[str, str], active_tasks: list[tuple[str, str]]) -> bool:
     ticket = card.get("ticket_id", "")
     objective = card_goal(card)
@@ -265,6 +311,7 @@ def render_start_status(
     pending_tasks: list[str],
     completed_tasks: list[str],
     orphan_cards: list[str],
+    bloat_reports: list[str],
 ) -> list[str]:
     status = ["### project-flow 开工状态", "", "## 🎯 当前聚焦待办 (P0)"]
     pending = [(state, title) for state, title in active_tasks if state in {" ", "✕", "x", "X"}]
@@ -324,7 +371,9 @@ def render_start_status(
             f"应确认后归档到 flow/history/tasks/ 或退回活跃区。"
         )
         status.extend(f"  - {card_id}" for card_id in orphan_cards)
-    if not pending_tasks and not completed_tasks and not orphan_cards:
+    if bloat_reports:
+        status.extend(f"- {report}" for report in bloat_reports)
+    if not pending_tasks and not completed_tasks and not orphan_cards and not bloat_reports:
         status.append("- 无")
     return status
 
@@ -431,6 +480,7 @@ def main() -> int:
             gate_code = max(gate_code, gate.returncode)
 
     orphan_cards = find_orphan_cards(cards, active_tasks)
+    bloat_reports = measure_plan_bloat(plan)
     print(
         "\n".join(
             render_start_status(
@@ -440,6 +490,7 @@ def main() -> int:
                 pending_tasks,
                 completed_tasks,
                 orphan_cards,
+                bloat_reports,
             )
         )
     )
