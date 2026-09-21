@@ -208,6 +208,10 @@ def main() -> None:
         assert "P0-1" in parallel.stdout and "P0-8" in parallel.stdout, parallel.stdout
 
         # 多端并行：同一张活跃卡被两个会话抢，后到者必须被认领记录拦住。
+        claims = flow / "claims"
+        if claims.is_dir():
+            for stale in claims.glob("*.json"):
+                stale.unlink()
         first = subprocess.run(
             [
                 sys.executable,
@@ -222,7 +226,8 @@ def main() -> None:
             text=True,
             capture_output=True,
         )
-        assert "本会话已认领" in first.stdout, first.stdout
+        # 意图命中 P0-1，认领应只落在该卡上。
+        assert "本会话已认领：P0-1" in first.stdout, first.stdout
         second = subprocess.run(
             [
                 sys.executable,
@@ -281,6 +286,28 @@ def main() -> None:
         )
         assert "前置依赖未交付" in dep.stdout, dep.stdout
         assert "P0-NOT-DONE" in dep.stdout, dep.stdout
+
+        # 认领必须按意图收敛：依赖未交付的卡不得被认领，避免一张会话吞掉整条队列。
+        claims_dir = flow / "claims"
+        if claims_dir.is_dir():
+            for stale in claims_dir.glob("*.json"):
+                stale.unlink()
+        dep_claim = subprocess.run(
+            [
+                sys.executable,
+                str(BOOT),
+                str(root),
+                "--intent",
+                "依赖任务",
+                "--thread-id",
+                "thread-dep-4444",
+                "--skip-budget",
+            ],
+            text=True,
+            capture_output=True,
+        )
+        assert "本会话已认领：P0-9" not in dep_claim.stdout, dep_claim.stdout
+        assert not (claims_dir / "P0-9.json").exists(), "依赖未交付的卡不应被认领"
 
         unregistered = subprocess.run(
             [

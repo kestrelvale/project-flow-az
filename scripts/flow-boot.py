@@ -85,6 +85,8 @@ def claim_active_tasks(
     cards: list[tuple[Path, dict[str, str]]],
     active_tasks: list[tuple[str, str]],
     thread_id: str,
+    intent: str = "",
+    dependency_blockers: list[str] | None = None,
 ) -> list[str]:
     """让当前会话认领本轮活跃任务，阻止另一个会话抢同一张卡。
 
@@ -97,12 +99,21 @@ def claim_active_tasks(
     claims = load_claims(flow)
     conflicts: list[str] = []
     owned: list[str] = []
+    # 依赖未交付的任务不许被认领，否则会话会抱着做不了的卡占地。
+    blocked = set()
+    for report in dependency_blockers or []:
+        blocked.add(report.split(" ", 1)[0])
     for path, card in cards:
         if card.get("mode") not in {"execute", "plan"}:
             continue
         if not card_is_linked(card, active_tasks):
             continue
         ticket = card.get("ticket_id") or path.stem
+        if ticket in blocked:
+            continue
+        # 多端并行时每个会话只认领与自己意图匹配的卡，避免一张会话吞掉整条队列。
+        if intent and not intent_matches(intent, active_tasks, [(path, card)]):
+            continue
         existing = claims.get(ticket)
         if existing:
             owner = str(existing.get("thread_id") or "")
@@ -720,7 +731,12 @@ def main() -> int:
     parallel_conflicts = find_parallel_conflicts(cards, active_tasks)
     dependency_blockers = find_dependency_blockers(cards, active_tasks, project_root / "flow")
     claim_reports = claim_active_tasks(
-        project_root / "flow", cards, active_tasks, args.thread_id
+        project_root / "flow",
+        cards,
+        active_tasks,
+        args.thread_id,
+        args.intent,
+        dependency_blockers,
     )
     print(
         "\n".join(
