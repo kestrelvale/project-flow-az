@@ -28,12 +28,43 @@ PHASE_METHOD = {"plan": "SDD", "execute": "TDD", "review": "ATDD", "handoff": "B
 
 
 def parse_card(path: Path) -> dict[str, str]:
+    """解析任务卡字段。
+
+    只取顶层 `key: value` 行，忽略缩进正文；`key: >` / `key: |` 这类
+    YAML 块标量只把后续缩进正文拼回来，避免把标记符本身当成字段值，
+    导致交付卡与门禁读到 `>` 而不是真实内容。
+    """
     values: dict[str, str] = {}
+    current: str | None = None
+    block: list[str] = []
+
+    def flush() -> None:
+        if current is None:
+            return
+        joined = " ".join(part.strip() for part in block if part.strip())
+        values[current] = joined or values.get(current, "")
+
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        if ":" not in line or line.startswith(" "):
+        if line.startswith((" ", "\t")):
+            if current is not None:
+                block.append(line)
+            continue
+        if ":" not in line:
             continue
         key, value = line.split(":", 1)
-        values[key.strip()] = value.strip()
+        flush()
+        current = key.strip()
+        block = []
+        value = value.strip()
+        if value in (">", "|", ">-", "|-", ">+", "|+"):
+            values[current] = value
+        else:
+            values[current] = value
+            current = None
+    flush()
+    for key, value in values.items():
+        if value.strip() in (">", "|", ">-", "|-", ">+", "|+"):
+            values[key] = ""
     return values
 
 

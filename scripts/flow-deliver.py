@@ -16,6 +16,21 @@ parse_card = FLOW_GATE.parse_card
 STATE_RE = re.compile(r"^\s*[-*]\s*\[([ \-✓✕xX])\]\s+(.+?)\s*$")
 
 
+def locate_plan(card: Path) -> Path:
+    """向上找到 flow/plan.md。
+
+    归档卡位于 flow/history/tasks/，用 card.parent.parent 会错算成
+    flow/history/plan.md，导致收工看板退化成“plan.md 不存在”。
+    """
+    for parent in card.resolve().parents:
+        if parent.name == "flow" and (parent / "plan.md").is_file():
+            return parent / "plan.md"
+        candidate = parent / "flow" / "plan.md"
+        if candidate.is_file():
+            return candidate
+    return card.parent.parent / "plan.md"
+
+
 def render(card: dict[str, str], changed: str, evidence: str) -> str:
     ticket = card.get("ticket_id", "(无 ticket_id)")
     objective = card.get("goal", "") or card.get("objective", "") or "缺少 goal/objective"
@@ -105,7 +120,7 @@ def main() -> int:
     parser.add_argument("--problem", default="")
     parser.add_argument("--next-step", default="")
     args = parser.parse_args()
-    plan = args.plan or args.card.parent.parent / "plan.md"
+    plan = args.plan or locate_plan(args.card)
     print(render_plan_sections(plan))
     print()
     print(

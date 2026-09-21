@@ -132,6 +132,8 @@ def main() -> None:
         assert "## ♻️ 回收建议" in boot.stdout, boot.stdout
         assert "待验收积压 1 项" in boot.stdout, boot.stdout
         assert "不得自动标记通过" in boot.stdout, boot.stdout
+        assert "孤儿任务卡 1 张" in boot.stdout, boot.stdout
+        assert "P1-1" in boot.stdout.split("## ♻️ 回收建议")[1], boot.stdout
         assert "## ⏳ 待人工验收" not in boot.stdout, boot.stdout
         assert "## 📦 已完结归档" not in boot.stdout, boot.stdout
         assert "## 💡 本轮决策" not in boot.stdout, boot.stdout

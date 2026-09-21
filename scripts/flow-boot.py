@@ -151,6 +151,21 @@ def text_overlap(left: str, right: str) -> bool:
     return any(fragment in right for fragment in fragments)
 
 
+def find_orphan_cards(
+    cards: list[tuple[Path, dict[str, str]]],
+    active_tasks: list[tuple[str, str]],
+) -> list[str]:
+    """任务卡存在但已不在活跃区，属于长期滞留的回收债务。"""
+    return sorted(
+        {
+            card.get("ticket_id") or path.name
+            for path, card in cards
+            if card.get("mode") in {"plan", "execute", "review"}
+            and not card_is_linked(card, active_tasks)
+        }
+    )
+
+
 def route_hint(
     active_tasks: list[tuple[str, str]],
     cards: list[tuple[Path, dict[str, str]]],
@@ -203,11 +218,7 @@ def route_hint(
             + "；收尾阶段：用 BDD 的 Given-When-Then 交接下一步，不进入 Execute 队列。"
         )
 
-    stale_cards = [
-        card.get("ticket_id", path.name)
-        for path, card in cards
-        if card.get("mode") in {"plan", "execute", "review"} and not card_is_linked(card, active_tasks)
-    ]
+    stale_cards = find_orphan_cards(cards, active_tasks)
     if stale_cards:
         hints.append(
             "静默任务卡：" + "、".join(stale_cards)
@@ -253,6 +264,7 @@ def render_start_status(
     unmanaged_tasks: list[tuple[str, str]],
     pending_tasks: list[str],
     completed_tasks: list[str],
+    orphan_cards: list[str],
 ) -> list[str]:
     status = ["### project-flow 开工状态", "", "## 🎯 当前聚焦待办 (P0)"]
     pending = [(state, title) for state, title in active_tasks if state in {" ", "✕", "x", "X"}]
@@ -304,7 +316,15 @@ def render_start_status(
         status.append(
             f"- 活跃区残留已完成项 {len(completed_tasks)} 项：应移入 flow/history/。"
         )
-    if not pending_tasks and not completed_tasks:
+    # 孤儿卡：任务卡存在但已不在活跃区，长期滞留 flow/tasks/ 会让后续开工
+    # 反复看到旧卡而互相干扰，属于必须暴露的回收债务。
+    if orphan_cards:
+        status.append(
+            f"- 孤儿任务卡 {len(orphan_cards)} 张：不在活跃区却仍留在 flow/tasks/，"
+            f"应确认后归档到 flow/history/tasks/ 或退回活跃区。"
+        )
+        status.extend(f"  - {card_id}" for card_id in orphan_cards)
+    if not pending_tasks and not completed_tasks and not orphan_cards:
         status.append("- 无")
     return status
 
@@ -410,6 +430,7 @@ def main() -> int:
             )
             gate_code = max(gate_code, gate.returncode)
 
+    orphan_cards = find_orphan_cards(cards, active_tasks)
     print(
         "\n".join(
             render_start_status(
@@ -418,6 +439,7 @@ def main() -> int:
                 unmanaged_tasks,
                 pending_tasks,
                 completed_tasks,
+                orphan_cards,
             )
         )
     )

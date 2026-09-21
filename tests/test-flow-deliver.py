@@ -78,6 +78,42 @@ def main() -> None:
         assert "## ⏳ 待人工验收" in report, report
         assert "P1-2 后续任务" in report, report
         assert "project-flow 交付验收卡" in report, report
+
+        # 归档卡位于 flow/history/tasks/，必须仍能找到 flow/plan.md。
+        flow = Path(tmp) / "flow"
+        (flow / "tasks").mkdir(parents=True, exist_ok=True)
+        (flow / "history" / "tasks").mkdir(parents=True, exist_ok=True)
+        (flow / "plan.md").write_text(
+            "\n".join(
+                [
+                    "## 🎯 当前聚焦待办 (P0)",
+                    "- [ ] P1-2 后续任务",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        archived = flow / "history" / "tasks" / "T-1.md"
+        archived.write_text(
+            "\n".join(
+                [
+                    "ticket_id: T-1",
+                    "goal: 修正登录失效",
+                    "mode: execute",
+                    "method: TDD",
+                    "write_whitelist: src/auth.ts",
+                    "verify_command: npm test -- auth",
+                    "acceptance: Given 有效账号，When 登录，Then 返回有效令牌",
+                    "evidence: tests/auth.test.ts Exit 0",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        # macOS 的 /var 是 /private/var 软链，比较必须走 resolve()。
+        assert module.locate_plan(archived).resolve() == (flow / "plan.md").resolve(), module.locate_plan(archived)
+        archived_report = module.render_plan_sections(module.locate_plan(archived))
+        assert "plan.md 不存在" not in archived_report, archived_report
+        assert "P1-2 后续任务" in archived_report, archived_report
+
     print("PASS: flow-deliver emits a complete acceptance card")
 
 

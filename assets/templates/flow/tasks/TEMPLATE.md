@@ -2,6 +2,7 @@
 #
 # 四阶段单向流转：plan(Plan/Goal/SDD) -> execute(TDD) -> review(ATDD) -> handoff(BDD)
 # 每进入下一阶段，只改 mode/method 并补齐该阶段必填字段，不要跳阶段。
+# 字段值保持单行；如确需换行请用 `key: >` 块标量并保证后续行缩进，解析器会拼回正文。
 
 ticket_id: P0-1
 goal: <一句话目标：可观察的结果，不是做法>

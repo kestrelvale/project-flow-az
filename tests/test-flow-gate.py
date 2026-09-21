@@ -5,6 +5,10 @@ from __future__ import annotations
 import importlib.util
 import tempfile
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from card_fixtures import write_block_scalar_card
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "flow-gate.py"
 spec = importlib.util.spec_from_file_location("flow_gate", SCRIPT)
@@ -83,6 +87,13 @@ def main() -> None:
             encoding="utf-8",
         )
         assert any("缺少字段: goal" in error for error in module.validate(card, "execute"))
+
+        # 块标量字段必须拼回正文，不能把 `>` 当成字段值。
+        write_block_scalar_card(card)
+        parsed = module.parse_card(card)
+        assert parsed["verify_command"] == "python3 tests/a.py && echo done", parsed
+        assert parsed["acceptance"] == "Given A When B Then C", parsed
+        assert module.validate(card, "execute") == [], module.validate(card, "execute")
 
         # 四阶段各自的关键必填字段与驱动模式必须对齐。
         cases = [
