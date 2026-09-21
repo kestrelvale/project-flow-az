@@ -117,6 +117,8 @@ def main() -> None:
         assert "未纳管遗留" in boot.stdout and "P9-9" in boot.stdout, boot.stdout
         assert "Execute 路由" in boot.stdout, boot.stdout
         assert "Plan 路由" in boot.stdout and "P0-2" in boot.stdout, boot.stdout
+        assert "项目初期阶段：只读执行 Plan / Goal / SDD 规划门" in boot.stdout, boot.stdout
+        assert "实现阶段：先写失败测试再最小实现 (TDD)" in boot.stdout, boot.stdout
         assert "静默任务卡" in boot.stdout and "P1-1" in boot.stdout, boot.stdout
         assert "本轮意图已绑定任务卡" in boot.stdout, boot.stdout
         assert "P1-1 | 未绑定活跃区" in boot.stdout, boot.stdout

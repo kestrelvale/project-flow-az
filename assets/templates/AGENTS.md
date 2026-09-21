@@ -47,9 +47,10 @@ python3 ~/.codex/skills/project-flow-az/scripts/flow-deliver.py flow/tasks/<tick
 每个执行型回合的第一次工具调用必须运行 `python3 ~/.codex/skills/project-flow-az/scripts/flow-boot.py . --intent "<本轮任务摘要>"`；该入口按需热同步、执行审计并输出“接管路由”。必须消费路由结果：
 
 - `活跃 [ ]`：本轮唯一施工焦点；
-- `Plan 路由`：先只读 SDD，禁止改业务代码；
-- `Execute 路由`：按 TDD -> ATDD -> BDD 执行；
-- `Handoff 路由`：只读交接卡，先转成活跃任务卡再施工；
+- `Plan 路由`（项目初期）：先只读执行 Plan / Goal / SDD 规划门，禁止改业务代码；
+- `Execute 路由`（实现期）：按 TDD 先写失败测试再最小实现；
+- `Review 路由`（验收期）：用 ATDD 可执行断言验收；
+- `Handoff 路由`（收尾期）：只读 BDD 交接卡，先转成活跃任务卡再施工；
 - `静默任务卡`、`[-]`、`history/`、`trash/`：不得抢占本轮任务；
 - `路由阻塞` 或“本轮意图未登记”：先补 `flow/plan.md` 与任务卡，不得直接改业务代码。
 - `project-flow 预算 [WARN]`：停止扩展读取范围，只保留当前任务必要文件，并准备交接棒；
@@ -74,6 +75,7 @@ python3 ~/.codex/skills/project-flow-az/scripts/flow-deliver.py flow/tasks/<tick
 - SDD/TDD/ATDD/BDD、Plan 模式、初始化、归档、热同步等长规范放在 `flow/规范/`，按当前任务类型加载，不塞回 AGENTS.md。
 - 无 Hook 时的“主动”定义为每次用户输入后的首动；无用户输入不会后台执行。无人值守任务必须由外部 automation 触发。
 - 安全范围内的验证临时目录和过长交接日志由 `flow-boot.py` 自动回收至 `flow/trash/verification-gc/` 或 `flow/history/`；业务交付物、任务卡和源码不会自动删除。
+- 阶段唯一映射：`plan`＝项目初期 Plan / Goal / SDD，`execute`＝实现期 TDD，`review`＝验收期 ATDD，`handoff`＝收尾期 BDD；单向流转，不跳阶段。
 - 复杂任务先创建 `flow/tasks/<ticket>.md`，按《计划模式交接SOP.md》决定交给 Codex Plan Mode 还是直接 Execute Mode；不把“已规划”或“已交接”当作“已交付”。
 
 <!-- project-flow-cy:end -->

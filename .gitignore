@@ -13,13 +13,14 @@
 *.log
 *.tmp
 *.bak
+*.bak_*
+.pytest_cache/
 __pycache__/
 *.pyc
 
 # Runtime output if someone runs the skill inside the skill repo by mistake
 /flow/
 /docs/
-/scripts/
 /src/
 /AGENTS.md
 /CLAUDE.md

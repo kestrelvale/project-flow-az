@@ -13,7 +13,7 @@
 
 ## 交接前主控动作
 
-1. 主控 Agent 在 `flow/tasks/<ticket>.md` 创建任务卡，填写 `ticket_id`、`objective`、`scope`、`write_whitelist`、`acceptance`。
+1. 主控 Agent 在 `flow/tasks/<ticket>.md` 创建任务卡，填写 `ticket_id`、`goal`（旧卡沿用 `objective`）、`scope`、`write_whitelist`、`acceptance`。
 2. 任务卡 `mode` 设为 `plan`，`next_agent` 明确写 `Codex Plan Mode`。
 3. 执行门禁：
 

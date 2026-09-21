@@ -49,6 +49,15 @@ require_text "assets/templates/AGENTS.md" "--what"
 require_text "assets/templates/AGENTS.md" "--why"
 require_text "assets/templates/AGENTS.md" "--next-step"
 require_text "assets/templates/AGENTS.md" "plan 先落盘"
+require_text "assets/templates/AGENTS.md" 'plan`＝项目初期 Plan / Goal / SDD'
+require_text "assets/templates/AGENTS.md" 'review`＝验收期 ATDD'
+require_text "SKILL.md" "阶段与驱动模式唯一映射"
+require_text "SKILL.md" "单向流转"
+require_text "references/驱动模式与验证策略.md" "四阶段与模式对齐"
+require_text "references/驱动模式与验证策略.md" "plan -> execute -> review -> handoff"
+require_text "assets/templates/flow/tasks/TEMPLATE.md" "goal: <一句话目标"
+require_text "assets/templates/flow/tasks/TEMPLATE.md" "Review 阶段产出 (ATDD)"
+require_text "assets/templates/flow/tasks/TEMPLATE.md" "Handoff 阶段产出 (BDD)"
 require_text "assets/templates/AGENTS.md" "交付验收卡"
 require_text "assets/templates/AGENTS.md" "收工写进展"
 require_text "assets/templates/AGENTS.md" "flow-boot.py"
@@ -63,6 +72,26 @@ require_text "references/hook机制.md" "--intent"
 require_file "references/会话预算与接力SOP.md"
 require_file "scripts/flow-budget.py"
 require_file "scripts/flow-deliver.py"
+require_file "scripts/flow-gate.py"
+require_file "scripts/flow-gc.py"
+require_file "scripts/sync-project.py"
+require_file "scripts/flow-sync.sh"
+
+# 引擎本体必须可分发：一旦被 .gitignore 重新排除，clone 出来的技能将缺少运行时。
+if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+  for engine in flow-boot.py flow-gate.py flow-deliver.py flow-budget.py \
+                flow-gc.py audit-flow.py sync-project.py flow-sync.sh; do
+    if git -C "$ROOT" check-ignore -q "scripts/$engine"; then
+      echo "FAIL: scripts/$engine 被 .gitignore 排除，clone 后将缺少引擎" >&2
+      exit 1
+    fi
+    git -C "$ROOT" ls-files --error-unmatch "scripts/$engine" >/dev/null 2>&1 || {
+      echo "FAIL: scripts/$engine 未纳入版本控制" >&2
+      exit 1
+    }
+  done
+fi
+
 require_file "tests/test-archive-layout.py"
 require_file "assets/templates/flow/history/plans/.gitkeep"
 require_file "assets/templates/flow/history/tasks/.gitkeep"

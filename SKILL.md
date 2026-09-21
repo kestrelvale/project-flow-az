@@ -1,9 +1,9 @@
 ---
 name: project-flow-az
-description: "生产级战略驱动设计多 Agent 协作工作流 (V4.9.2 完整收工汇报版)。融合奥卡姆剃刀、Ask-Matt (Smart Zone/单票独立会话)、孙子兵法 (兵贵神速/避实击虚) 与矛盾论 (主要矛盾第一/代码落地优先) 四大哲学内核."
+description: "生产级战略驱动设计多 Agent 协作工作流 (V4.9.3 完整收工汇报版)。融合奥卡姆剃刀、Ask-Matt (Smart Zone/单票独立会话)、孙子兵法 (兵贵神速/避实击虚) 与矛盾论 (主要矛盾第一/代码落地优先) 四大哲学内核."
 ---
 
-# project-flow-az (生产级战略驱动设计 V4.9.2 完整收工汇报版)
+# project-flow-az (生产级战略驱动设计 V4.9.3 完整收工汇报版)
 
 把任何项目(代码 / 调研 / 内容 / 方案)按清晰的**四大哲学支柱（奥卡姆剃刀/Ask-Matt/孙子兵法/矛盾论）与四大先进驱动设计流水线（SDD ➔ TDD ➔ ATDD ➔ BDD）**来管理。
 **上下文落进文件，Agent 之间靠 `flow/`、`docs/` 异步接力，跨模型评审做质量门。彻底杜绝历史任务反复加载、杜绝上下文爆炸截断、杜绝过度探查死循环、杜绝以文代码假完工。**
@@ -166,6 +166,17 @@ description: "生产级战略驱动设计多 Agent 协作工作流 (V4.9.2 完�
 python3 ~/.codex/skills/project-flow-az/scripts/flow-boot.py . --intent "<本轮任务摘要>"
 ```
 该入口向上定位项目、按需热同步、执行只读审计、输出接管路由并执行会话预算门禁。必须消费活跃焦点、Plan/Execute/Handoff 路由、静默卡、“本轮意图未登记”和 `flow-budget.py` 的 WARN/STOP 结果；发现 FAIL/WARN、路由阻塞、未登记任务或预算 STOP 时，先补齐 SDD 登记、落盘并写交接棒，再决定是否开新会话。`flow-sync.sh` 仅作为内部同步器，不作为开工入口。
+
+#### 阶段与驱动模式唯一映射（不跳阶段，不混用）
+
+| 项目阶段 | 计划模式 | 驱动模式 | 任务卡 `mode` | 阶段职责 |
+|---|---|---|---|---|
+| 项目初期 | Plan / Goal | SDD | `plan` | 定目标、锁规格、拆原子任务；只读，不改业务代码 |
+| 实现期 | - | TDD | `execute` | 先写失败测试，再最小实现使其通过 |
+| 验收期 | - | ATDD | `review` | 把验收标准转成可执行断言并留证据 |
+| 收尾期 | - | BDD | `handoff` | Given-When-Then 描述行为，交接下一步动作 |
+
+单向流转 `plan -> execute -> review -> handoff`：任务卡以 `goal` 表达目标（旧卡兼容 `objective`），进入下一阶段只改 `mode`/`method` 并补齐该阶段必填字段，再由 `flow-gate.py --phase <阶段>` 放行。注意：本流程的 `plant` 指 Plan（计划模式），不是 PlantUML 等图示工具。
 
 ---
 

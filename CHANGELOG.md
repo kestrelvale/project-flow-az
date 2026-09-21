@@ -1,3 +1,29 @@
+## [4.9.3] - 2026-09-21 (四阶段驱动模式接管修复版)
+
+### Fixed
+- 修复门禁只认 `objective`、但全局说明要求 `goal`，导致所有任务卡在 `flow-boot.py` 一律 FAIL、整个接管看起来失效的问题。
+- 修复 `flow-gate.py` 未真正强制四阶段单向门的问题，`goal` 不再是门禁必填项而是与 `objective` 互为别名，二者至少一个即可。
+- 修复收工交付卡把目标字段写死为 `objective` 的问题，新卡 `goal` 现在能正确显示。
+
+### Added
+- 固化阶段与驱动模式唯一映射：`plan`＝项目初期 Plan / Goal / SDD，`execute`＝实现期 TDD，`review`＝验收期 ATDD，`handoff`＝收尾期 BDD，单向流转不跳阶段。
+- 门禁回归测试补齐四阶段必填字段与 `goal` 别名兼容用例。
+- 开工路由直接打印阶段语义，明确“项目初期/实现阶段/验收阶段/收尾阶段”各自该做什么。
+- 任务卡模板增加 Plan/Execute/Review/Handoff 各阶段产出区。
+
+### Verification
+- `python3 -m py_compile scripts/*.py` 与全部 7 个测试脚本 Exit 0。
+- 端到端验证 `plan -> execute -> review -> handoff` 四阶段门禁全部通过，跳阶段缺失字段时正确 FAIL。
+- 旧 `objective` 单字段任务卡可继续通过门禁与接管路由，不破坏历史项目。
+
+### Packaging
+- 修复 `.gitignore` 中 `/scripts/` 把引擎本体（`flow-boot.py` / `flow-gate.py` / `flow-deliver.py` 等 8 个脚本，约 1400 行）整体排除出版本库的问题；该规则原意为防止误跑产生的运行时输出，但 `sync-project.py` 从不在目标项目创建 `scripts/`，属于误伤。
+- 引擎脚本正式纳入版本控制并补齐可执行位，`git clone` 后不再缺少运行时；此前 README 的 clone 即安装承诺才真正成立。
+- 补齐 `*.bak_*` 与 `.pytest_cache/` 忽略规则，替代原来的过度忽略。
+
+### Verified
+- 全新 `git clone` 后 8 个引擎脚本齐全，仓库根目录可直接运行 `flow-boot.py` 与全部测试。
+
 ## [4.8.4] - 2026-09-20 (待办、决策与回收治理版)
 
 ### Added
