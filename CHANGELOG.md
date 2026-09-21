@@ -11,18 +11,18 @@
 - 开工路由直接打印阶段语义，明确“项目初期/实现阶段/验收阶段/收尾阶段”各自该做什么。
 - 任务卡模板增加 Plan/Execute/Review/Handoff 各阶段产出区。
 
-### Verification
-- `python3 -m py_compile scripts/*.py` 与全部 7 个测试脚本 Exit 0。
-- 端到端验证 `plan -> execute -> review -> handoff` 四阶段门禁全部通过，跳阶段缺失字段时正确 FAIL。
-- 旧 `objective` 单字段任务卡可继续通过门禁与接管路由，不破坏历史项目。
-
 ### Packaging
 - 修复 `.gitignore` 中 `/scripts/` 把引擎本体（`flow-boot.py` / `flow-gate.py` / `flow-deliver.py` 等 8 个脚本，约 1400 行）整体排除出版本库的问题；该规则原意为防止误跑产生的运行时输出，但 `sync-project.py` 从不在目标项目创建 `scripts/`，属于误伤。
 - 引擎脚本正式纳入版本控制并补齐可执行位，`git clone` 后不再缺少运行时；此前 README 的 clone 即安装承诺才真正成立。
 - 补齐 `*.bak_*` 与 `.pytest_cache/` 忽略规则，替代原来的过度忽略。
+- 新增结构回归测试：任一引擎脚本若再次被 `.gitignore` 排除或未入库，测试直接 FAIL。
 
-### Verified
-- 全新 `git clone` 后 8 个引擎脚本齐全，仓库根目录可直接运行 `flow-boot.py` 与全部测试。
+### Verification
+- `python3 -m py_compile scripts/*.py` 与全部 7 个测试脚本 Exit 0。
+- 端到端验证 `plan -> execute -> review -> handoff` 四阶段门禁全部通过，跳阶段缺失字段时正确 FAIL。
+- 旧 `objective` 单字段任务卡可继续通过门禁与接管路由，不破坏历史项目。
+- 全新 `git clone` 后 8 个引擎脚本齐全，用 clone 出来的引擎接管临时新项目：输出 Plan 路由且门禁 Exit 0。
+- 已热更新 12 个已接入项目至 4.9.3，任务卡模板均带 `goal` 字段。
 
 ## [4.8.4] - 2026-09-20 (待办、决策与回收治理版)
 

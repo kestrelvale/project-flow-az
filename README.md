@@ -5,6 +5,19 @@
 
 把任何项目（代码 / 调研 / 内容 / 方案）当 repo 管的一套 **企业级 AI 多 Agent 协作流程与闭环状态机**。
 
+## 四阶段与驱动模式（唯一映射）
+
+项目生命周期单向流转，每个阶段绑定一种驱动模式，任务卡 `mode` 与 `method` 必须对齐，由 `flow-gate.py --phase <阶段>` 放行：
+
+| 项目阶段 | 计划模式 | 驱动模式 | 任务卡 `mode` | 阶段职责 |
+|---|---|---|---|---|
+| 项目初期 | Plan / Goal | SDD | `plan` | 定目标、锁规格、拆原子任务；只读，不改业务代码 |
+| 实现期 | - | TDD | `execute` | 先写失败测试，再最小实现使其通过 |
+| 验收期 | - | ATDD | `review` | 把验收标准转成可执行断言并留证据 |
+| 收尾期 | - | BDD | `handoff` | Given-When-Then 描述行为，交接下一步动作 |
+
+流转顺序固定为 `plan -> execute -> review -> handoff`，不跳阶段、不混用。任务卡以 `goal` 表达目标（旧卡兼容 `objective`）。注意：本流程中的 `plant` 指 Plan（计划模式），不是 PlantUML 等图示工具。
+
 核心是三句话：
 
 - 上下文落进文件，不锁在对话里。
@@ -14,7 +27,7 @@
 这个 skill 负责三类核心操作与四大控制机制：
 
 1. **初始化 / 接入项目**：先判断单体项目、单仓多子项目或多独立仓库，再铺好对应层级的 `flow/`、`docs/`、规则入口和方法论副本。project-flow 不安装任何 Hook。
-2. **开工接管与路由**：项目内执行型回合首动运行 `flow-boot.py`，完成热同步、审计、任务状态汇总、Plan / Execute / Handoff 路由、预算门禁和回收建议。
+2. **开工接管与路由**：项目内执行型回合首动运行 `flow-boot.py`，完成热同步、审计、任务状态汇总、Plan / Execute / Review / Handoff 路由、预算门禁和回收建议。
 3. **任务四状态机闭环与分级回收**：按 `[ ]`待完成、`[-]`待验收、`[✓]`已完成、`[✕]`不合格流转任务；待验收积压会明确暴露，但不能自动验收或自动归档。
 4. **收工交付与交接**：验证留有 Exit 0 证据、准备提交人工验收时，才输出完整四状态看板与交付验收卡；交接写入 `flow/进展.md` 顶部。
 5. **全局 Skill 自动热同步与版本接管**：项目开工或调用时比对版本并幂等同步规范、合同块与任务卡模板。
@@ -64,6 +77,8 @@ git clone https://github.com/kestrelvale/project-flow-az ~/Documents/cc-skills/p
 ```
 
 安装或更新后，新开会话，确认 skill 列表里出现 `project-flow-az`（或 `project-flow-cy`）。
+
+> **引擎随仓库分发**：`scripts/` 下的运行时（`flow-boot.py` / `flow-gate.py` / `flow-deliver.py` / `flow-budget.py` / `flow-gc.py` / `audit-flow.py` / `sync-project.py` / `flow-sync.sh`）已纳入版本控制，`git clone` 后即可直接运行，无需额外安装步骤。结构测试会校验这些脚本未被 `.gitignore` 排除。
 
 ## WikiSkill：持久经验与技能演化
 
