@@ -67,6 +67,18 @@ python3 ~/.codex/skills/project-flow-az/scripts/flow-deliver.py flow/tasks/<tick
 - `project-flow 预算 [WARN]`：停止扩展读取范围，只保留当前任务必要文件，并准备交接棒；
 - `project-flow 预算 [STOP]`：禁止继续扩展实现或大范围探查，先落盘现有成果、写 `flow/进展.md` 顶部交接棒，并把 `flow-budget.py` 输出的接力提示词交给新会话。
 
+交接棒必须写全四字段，缺一视为未交接（`flow-boot.py` 会在下一轮开工时拦出）：
+
+```markdown
+## YYYY-MM-DD · <任务> · <谁>
+- 现状: <已做到哪，具体到文件路径或 Exit 0 命令>
+- 还剩: <未完成项清单>
+- 卡在哪: <熔断原因 / 缺什么 / 无>
+- 下一步: <接手方第一条具体命令>
+```
+
+单条交接棒控制在 1200 字节内；只写现状、剩余、阻塞与下一步，不复述背景。
+
 ### 4. 交付验收卡
 
 完成后给出改动文件绝对路径、验证命令与 Exit 0 证据；需人工确认时补 Given-When-Then。

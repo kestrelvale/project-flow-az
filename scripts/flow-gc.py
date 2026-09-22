@@ -10,6 +10,12 @@ import shutil
 
 SAFE_TEMP_DIRS = {".tmp", "verification-tmp", "test-output", "test-results"}
 MAX_PROGRESS_ENTRIES = 5
+# 只按条数分页不够：单条日志可达 1.5KB，5 条也可能几十 KB。
+# 再加字节上限，超限即滚动，避免历史把开工上下文撑爆。
+# 实测：o2o 进展.md 涨到 52KB / 41 条，每次开工全量灌进上下文导致熔断。
+# 阈值按“开工可承受”设定，而不是按条数。
+MAX_PROGRESS_BYTES = 12_000
+KEEP_PROGRESS_BYTES = 6_000
 HISTORY_DIRS = ("plans", "tasks", "progress")
 TRASH_DIRS = ("deprecated", "verification")
 
@@ -29,15 +35,40 @@ def _rotate_progress(flow: Path, apply: bool) -> list[str]:
     if not progress.is_file():
         return []
     lines = progress.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
-    headings = [index for index, line in enumerate(lines) if line.startswith("## ")]
-    if len(headings) <= MAX_PROGRESS_ENTRIES:
+    # 条目标题可能是 `## ` 或 `### `：模板用 `## `，但历史项目实际写成
+    # `### `，旧实现只认 `## `，导致 40 条日志一条都没滚动。
+    headings = [
+        index
+        for index, line in enumerate(lines)
+        if line.startswith("## ") or line.startswith("### ")
+    ]
+    total_bytes = len("".join(lines))
+    if len(headings) <= MAX_PROGRESS_ENTRIES and total_bytes <= MAX_PROGRESS_BYTES:
         return []
-    cutoff = headings[MAX_PROGRESS_ENTRIES]
+
+    if not headings:
+        return []
+
+    # 从最旧一端开始裁：保留最近若干条，直到保留部分进入 KEEP_PROGRESS_BYTES。
+    # 同时满足“条数不超上限、字节不超上限”两个约束，取两者中更靠后的切点。
+    cutoff = headings[-1]
+    for index in headings[1:]:
+        if len("".join(lines[index:])) <= KEEP_PROGRESS_BYTES:
+            cutoff = index
+            break
+    if len(headings) > MAX_PROGRESS_ENTRIES:
+        cutoff = min(cutoff, headings[MAX_PROGRESS_ENTRIES])
+
     old = "".join(lines[cutoff:])
     if not old.strip():
         return []
     destination = flow / "history" / "progress" / f"进展_{datetime.now():%Y%m}.md"
-    message = f"进展.md: 滚动 {len(headings) - MAX_PROGRESS_ENTRIES} 条旧记录 -> {destination.relative_to(flow.parent)}"
+    moved = sum(1 for index in headings if index >= cutoff)
+    message = f"进展.md: 滚动 {moved} 条旧记录 -> {destination.relative_to(flow.parent)}"
+    # 单条本身就可能超过保留阈值，此时只保证最新一条留在活跃区，
+    # 由交接规范（≤1200 字节）约束它不能写成巨块。
+    if len("".join(lines[cutoff:]).encode("utf-8")) > MAX_PROGRESS_BYTES:
+        message += "（最新一条仍超阈值，请按交接规范精简）"
     if apply:
         destination.parent.mkdir(parents=True, exist_ok=True)
         with destination.open("a", encoding="utf-8") as handle:

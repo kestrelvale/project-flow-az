@@ -251,6 +251,65 @@ MAX_ACCEPTANCE_STEPS = 5
 MAX_SCOPE_LINES = 12
 MAX_SCOPE_ITEMS = 8
 
+# 交接棒结构化四字段：缺一项，下一个会话就得重读 plan + 任务卡 + 进展才能拼状态，
+# 这部分重复劳动实测会吃掉大量预算。字段名保持简短以降低书写成本。
+HANDOFF_FIELDS = ("现状", "还剩", "卡在哪", "下一步")
+MAX_HANDOFF_BYTES = 1200
+
+
+def latest_handoff(flow: Path) -> tuple[str, str]:
+    """取 flow/进展.md 顶部第一条记录（标题 + 正文）。"""
+    progress = flow / "进展.md"
+    if not progress.is_file():
+        return "", ""
+    lines = progress.read_text(encoding="utf-8", errors="replace").splitlines()
+    start = None
+    for index, line in enumerate(lines):
+        if line.startswith("## ") or line.startswith("### "):
+            start = index
+            break
+    if start is None:
+        return "", ""
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        if lines[index].startswith("## ") or lines[index].startswith("### "):
+            end = index
+            break
+    block = lines[start:end]
+    return block[0].strip(), "\n".join(block)
+
+
+def check_handoff_schema(flow: Path, stopped: bool) -> list[str]:
+    """校验顶部交接棒是否写全四字段。
+
+    只在上一轮因预算 STOP 中断时强制：那种情况下新会话完全依赖交接棒
+    还原现场，字段缺一就必须重读全部文件，等于把熔断成本再付一遍。
+    """
+    if not stopped:
+        return []
+    title, body = latest_handoff(flow)
+    if not title:
+        return ["进展.md 顶部没有交接记录：熔断后必须留下结构化交接棒。"]
+    problems: list[str] = []
+    missing = [field for field in HANDOFF_FIELDS if f"{field}" not in body]
+    if missing:
+        problems.append(
+            f"交接棒缺少字段：{'、'.join(missing)}；"
+            f"必须补全「现状 / 还剩 / 卡在哪 / 下一步」，否则新会话需重读全部文件。"
+        )
+    if len(body.encode("utf-8")) > MAX_HANDOFF_BYTES:
+        problems.append(
+            f"交接棒 {len(body.encode('utf-8'))} 字节（上限 {MAX_HANDOFF_BYTES}）："
+            f"过长说明在复述背景，应只写现状、剩余、阻塞与下一步。"
+        )
+    return problems
+
+
+def progress_has_stop(flow: Path) -> bool:
+    """上一轮是否以预算 STOP / 熔断收尾。"""
+    _, body = latest_handoff(flow)
+    return any(marker in body for marker in ("STOP", "熔断", "预算"))
+
 
 def measure_card_size(card: dict[str, str]) -> list[str]:
     """暴露体量过大、必然中途熔断的任务卡。
@@ -620,6 +679,7 @@ def render_start_status(
     dependency_blockers: list[str],
     claim_reports: list[str],
     oversized_cards: list[str],
+    handoff_problems: list[str],
 ) -> list[str]:
     status = ["### project-flow 开工状态", "", "## 🎯 当前聚焦待办 (P0)"]
     pending = [(state, title) for state, title in active_tasks if state in {" ", "✕", "x", "X"}]
@@ -657,7 +717,16 @@ def render_start_status(
         status.extend(f"  - {report}" for report in oversized_cards[:3])
         if len(oversized_cards) > 3:
             status.append(f"  - …另有 {len(oversized_cards) - 3} 张。")
-    if not blockers and not parallel_conflicts and not dependency_blockers and not claim_reports and not oversized_cards:
+    if handoff_problems:
+        status.extend(f"- {report}" for report in handoff_problems)
+    if (
+        not blockers
+        and not parallel_conflicts
+        and not dependency_blockers
+        and not claim_reports
+        and not oversized_cards
+        and not handoff_problems
+    ):
         status.append("- 无")
 
     status.extend(["", "## 🧹 未纳管遗留"])
@@ -812,6 +881,9 @@ def main() -> int:
     parallel_conflicts = find_parallel_conflicts(cards, active_tasks)
     dependency_blockers = find_dependency_blockers(cards, active_tasks, project_root / "flow")
     oversized_cards = find_oversized_cards(cards, active_tasks)
+    handoff_problems = check_handoff_schema(
+        project_root / "flow", progress_has_stop(project_root / "flow")
+    )
     claim_reports = claim_active_tasks(
         project_root / "flow",
         cards,
@@ -834,6 +906,7 @@ def main() -> int:
                 dependency_blockers,
                 claim_reports,
                 oversized_cards,
+                handoff_problems,
             )
         )
     )
