@@ -120,6 +120,33 @@ flow/
 - 验收证据或垃圾来源；
 - 时间戳。
 
+### 3.4 任务归档必须用工具执行（不再手写回执）
+
+任务归档只能通过 `flow-gc.py --task-archive` 完成，它会移动任务卡并写出标准 JSON 回执：
+
+```bash
+python3 ~/.codex/skills/project-flow-az/scripts/flow-gc.py . \
+  --task-archive P0-XX --evidence "verify Exit 0" --apply
+```
+
+回执格式：
+
+```json
+{
+  "operation": "task_archive",
+  "ticket_id": "P0-XX",
+  "from": "flow/tasks/P0-XX.md",
+  "to": "flow/history/tasks/P0-XX.md",
+  "reason": "user_accepted",
+  "evidence": "verify Exit 0",
+  "timestamp": "2026-09-22T11:50:13"
+}
+```
+
+**没有 `--evidence` 会被拒绝归档。** `audit-flow.py` 会检出 `history/tasks/` 下
+没有对应 JSON 回执的归档卡并报警——这样“哪个任务归档了、为什么、什么证据”
+三问都能用一条命令答出来，而不是靠翻手写 Markdown 猜。
+
 ---
 
 ## 4. 防反复执行与防漂移铁律

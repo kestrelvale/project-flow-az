@@ -123,11 +123,91 @@ def gc(root: Path, apply: bool = False) -> dict:
     return result
 
 
+TASK_ARCHIVE_DIR = ("history", "tasks")
+
+
+def archive_task(
+    root: Path,
+    ticket: str,
+    *,
+    reason: str,
+    evidence: str,
+    apply: bool = False,
+) -> dict:
+    """把已验收任务卡归档到 flow/history/tasks/ 并写标准回执。
+
+    旧实现靠手写 Markdown 回执，格式各异且机器读不了，导致“这个任务归档了没、
+    为什么归档、有什么证据”三问答不上来。这里统一成 JSON 回执。
+    """
+    root = root.resolve()
+    flow = root / "flow"
+    source = flow / "tasks" / f"{ticket}.md"
+    destination = flow.joinpath(*TASK_ARCHIVE_DIR) / f"{ticket}.md"
+    result = {
+        "root": str(root),
+        "ticket_id": ticket,
+        "from": str(source.relative_to(root)),
+        "to": str(destination.relative_to(root)),
+        "reason": reason,
+        "evidence": evidence,
+        "apply": apply,
+    }
+    if not source.is_file():
+        result["error"] = f"任务卡不存在：{source.relative_to(root)}"
+        return result
+    if not evidence.strip():
+        result["error"] = "缺少验收证据：归档必须绑定 evidence"
+        return result
+    if apply:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source), str(destination))
+        receipt_dir = flow / "gc" / "receipts"
+        receipt_dir.mkdir(parents=True, exist_ok=True)
+        receipt = receipt_dir / f"{datetime.now():%Y%m%d-%H%M%S}-{ticket}.json"
+        payload = {
+            "operation": "task_archive",
+            "ticket_id": ticket,
+            "from": result["from"],
+            "to": result["to"],
+            "reason": reason,
+            "evidence": evidence,
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+        }
+        receipt.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        result["receipt"] = str(receipt.relative_to(root))
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("root", nargs="?", default=".")
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--task-archive", metavar="TICKET", default="")
+    parser.add_argument("--reason", default="user_accepted")
+    parser.add_argument("--evidence", default="")
     args = parser.parse_args()
+
+    if args.task_archive:
+        archived = archive_task(
+            Path(args.root),
+            args.task_archive,
+            reason=args.reason,
+            evidence=args.evidence,
+            apply=args.apply,
+        )
+        if archived.get("error"):
+            print(f"project-flow 归档失败：{archived['error']}")
+            return 1
+        action = "已归档" if args.apply else "待归档"
+        print(f"project-flow Task Archive [{action}]: {archived['ticket_id']}")
+        print(f"- {archived['from']} -> {archived['to']}")
+        print(f"- 原因：{archived['reason']}；证据：{archived['evidence']}")
+        if archived.get("receipt"):
+            print(f"- 回执：{archived['receipt']}")
+        return 0
+
     result = gc(Path(args.root), args.apply)
     mode = "已回收" if args.apply else "待回收"
     print(f"project-flow GC [{mode}]: {result['root']}")

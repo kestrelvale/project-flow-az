@@ -3,14 +3,20 @@
 # 四阶段单向流转：plan(Plan/Goal/SDD) -> execute(TDD) -> review(ATDD) -> handoff(BDD)
 # 每进入下一阶段，只改 mode/method 并补齐该阶段必填字段，不要跳阶段。
 # 字段值保持单行；如确需换行请用 `key: >` 块标量并保证后续行缩进，解析器会拼回正文。
+# schema: v2 表示走严格产物门禁；老卡无此字段则沿用宽松规则。
 
 ticket_id: P0-1
+schema: v2
 goal: <一句话目标：可观察的结果，不是做法>
 mode: plan
 method: SDD,TDD,ATDD,BDD
-scope: <输入、输出、边界和失败状态>
+scope: |
+  输入：<触发方式、字段、有效与无效边界>
+  输出：<返回值、界面状态、文件或日志变化>
+  边界：<不做的事与失败状态>
 write_whitelist: <允许修改的文件或目录>
 depends_on: <前置任务 ticket_id；多个用逗号分隔，无则留空或写 无>
+red_test: <execute 阶段先失败的测试文件路径，先红后绿>
 verify_command: <可复现的 Exit 0 验证命令>
 acceptance: <Given-When-Then 或可执行验收断言>
 evidence: <验证凭证路径，交付前填写>

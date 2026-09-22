@@ -26,6 +26,76 @@ REQUIRED = {
 PLACEHOLDER_RE = re.compile(r"^(?:<[^>]+>|待确认|TODO|TBD|暂缺|未填写)$", re.IGNORECASE)
 PHASE_METHOD = {"plan": "SDD", "execute": "TDD", "review": "ATDD", "handoff": "BDD"}
 
+# v2 任务卡：把 Plan/SDD/TDD/ATDD/BDD 从“字段里有这个词”升级为“产物必须存在”。
+# 老卡没有 schema 标记，继续走原规则，避免一次性推翻所有在途任务。
+STRICT_SCHEMA = "v2"
+SCOPE_REQUIRED_PARTS = ("输入", "输出", "边界")
+
+
+def find_project_root(card: Path) -> Path | None:
+    """从任务卡向上找到含 flow/ 的项目根。"""
+    for parent in card.resolve().parents:
+        if parent.name == "flow":
+            return parent.parent
+        if (parent / "flow").is_dir():
+            return parent
+    return None
+
+
+def _is_real_path(card: Path, raw: str) -> bool:
+    """字段里的路径是否真的存在于磁盘。
+
+    只取首个看起来像路径的片段，允许 `path Exit 0` 这类带说明的写法。
+    """
+    root = find_project_root(card) or card.parent
+    for token in re.split(r"[\s,，;；]+", raw.strip()):
+        token = token.strip("`（）()[]")
+        if not token or token in {">", "|", "-"}:
+            continue
+        if not re.search(r"[/\\.]", token) and not token.endswith((".py", ".ts", ".js", ".sh", ".md")):
+            continue
+        candidate = (root / token).resolve()
+        if candidate.exists():
+            return True
+    return False
+
+
+def validate_strict(card: Path, values: dict[str, str], phase: str) -> list[str]:
+    """v2 卡的阶段产物校验：每个驱动模式必须有可验证产物。"""
+    errors: list[str] = []
+    scope = values.get("scope", "").strip()
+    acceptance = values.get("acceptance", "").strip()
+
+    # SDD：plan 阶段必须把输入、输出、边界写全，否则拆解没有依据。
+    if phase == "plan":
+        missing = [part for part in SCOPE_REQUIRED_PARTS if part not in scope]
+        if missing:
+            errors.append(
+                f"SDD 规格不完整：scope 缺少 {'、'.join(missing)}；"
+                f"必须写明输入、输出、边界，否则无法据此拆解原子任务"
+            )
+
+    # TDD：execute 阶段必须留下一个真实存在的失败测试证据。
+    if phase == "execute":
+        red = values.get("red_test", "").strip()
+        if not red:
+            errors.append("TDD 缺 red_test：必须填写先失败测试的文件路径（先红后绿）")
+        elif not _is_real_path(card, red):
+            errors.append(f"TDD red_test 指向的文件不存在：{red}")
+
+    # ATDD：review 阶段证据必须落到真实文件，而不是一句“已验证”。
+    if phase == "review":
+        evidence = values.get("evidence", "").strip()
+        if evidence and not _is_real_path(card, evidence):
+            errors.append(f"ATDD 证据文件不存在：{evidence}")
+
+    # BDD：收尾交接必须给出结构化行为描述。
+    if phase in {"review", "handoff"}:
+        if "Given" not in acceptance or "Then" not in acceptance:
+            errors.append("BDD 验收必须写成 Given-When-Then，用可观测行为描述结果")
+
+    return errors
+
 
 def parse_card(path: Path) -> dict[str, str]:
     """解析任务卡字段。
@@ -96,6 +166,8 @@ def validate(path: Path, phase: str) -> list[str]:
     required_method = PHASE_METHOD[phase]
     if required_method not in methods:
         errors.append(f"{phase} 阶段 method 必须包含 {required_method}")
+    if values.get("schema", "").strip().lower() == STRICT_SCHEMA:
+        errors.extend(validate_strict(path, values, phase))
     return errors
 
 

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 
@@ -55,7 +56,31 @@ def main() -> None:
         assert len(remaining) < module.MAX_PROGRESS_BYTES, len(remaining)
         assert len(remaining) < before, (before, len(remaining))
 
-    print("PASS: flow-gc rotates both '###' logs and oversized logs")
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "flow" / "tasks").mkdir(parents=True)
+        (root / "flow" / "history" / "tasks").mkdir(parents=True)
+        (root / "flow" / "gc" / "receipts").mkdir(parents=True)
+        card = root / "flow" / "tasks" / "P0-9.md"
+        card.write_text("ticket_id: P0-9\ngoal: 演示\ngoal_x: 1\n", encoding="utf-8")
+
+        # 无证据不得归档：归档必须绑定验收证据。
+        refused = module.archive_task(root, "P0-9", reason="user_accepted", evidence="", apply=True)
+        assert refused.get("error"), refused
+        assert card.exists(), "缺证据时不应移动任务卡"
+
+        # 带证据归档：移动任务卡并写 JSON 回执。
+        done = module.archive_task(
+            root, "P0-9", reason="user_accepted", evidence="verify Exit 0", apply=True
+        )
+        assert done.get("receipt"), done
+        assert (root / "flow" / "history" / "tasks" / "P0-9.md").is_file()
+        assert not card.exists(), "归档后原卡应移走"
+        receipt = json.loads((root / "flow" / "gc" / "receipts" / Path(done["receipt"]).name).read_text(encoding="utf-8"))
+        assert receipt["operation"] == "task_archive", receipt
+        assert receipt["ticket_id"] == "P0-9" and receipt["evidence"] == "verify Exit 0", receipt
+
+    print("PASS: flow-gc rotates logs and archives tasks with receipts")
 
 
 if __name__ == "__main__":

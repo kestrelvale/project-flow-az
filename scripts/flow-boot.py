@@ -34,6 +34,8 @@ CARD_KEYS = (
     "write_whitelist",
     "verify_command",
     "acceptance",
+    "red_test",
+    "schema",
     "depends_on",
     "next_agent",
     "next_action",

@@ -129,7 +129,71 @@ def main() -> None:
             errors = module.validate(card, phase)
             assert any(absent_key in error for error in errors), (phase, errors)
 
-    print("PASS: flow-gate enforces four-phase modes and goal alias")
+        # v2 严格模式：Plan/SDD/TDD/ATDD/BDD 必须留下真实产物。
+        root = Path(tmp)
+        (root / "flow" / "tasks").mkdir(parents=True, exist_ok=True)
+        (root / "tests").mkdir(exist_ok=True)
+        (root / "tests" / "test_x.py").write_text("assert True\n", encoding="utf-8")
+        (root / "evidence.txt").write_text("Exit 0\n", encoding="utf-8")
+        v2 = root / "flow" / "tasks" / "V2.md"
+
+        def write_v2(**over: str) -> None:
+            base = {
+                "ticket_id": "V2-1",
+                "schema": "v2",
+                "goal": "严格门禁演示",
+                "mode": "plan",
+                "method": "SDD,TDD,ATDD,BDD",
+                "scope": "输入：x\n输出：y\n边界：z",
+                "write_whitelist": "tests/test_x.py",
+                "red_test": "tests/test_x.py",
+                "verify_command": "python3 tests/test_x.py",
+                "acceptance": "Given A，When B，Then C",
+                "evidence": "evidence.txt",
+                "next_agent": "Codex Execute Mode",
+                "next_action": "执行下一步",
+            }
+            base.update(over)
+            v2.write_text("\n".join(f"{k}: {v}" for k, v in base.items()), encoding="utf-8")
+
+        # SDD：scope 缺“边界”必须 FAIL。
+        write_v2(scope="输入：x\n输出：y")
+        assert any("SDD 规格不完整" in e for e in module.validate(v2, "plan")), module.validate(v2, "plan")
+
+        # TDD：red_test 指向不存在的文件必须 FAIL。
+        write_v2(mode="execute", method="TDD", red_test="tests/nope.py")
+        assert any("red_test 指向的文件不存在" in e for e in module.validate(v2, "execute"))
+
+        # TDD：red_test 真实存在则通过。
+        write_v2(mode="execute", method="TDD")
+        assert module.validate(v2, "execute") == [], module.validate(v2, "execute")
+
+        # ATDD：证据文件不存在必须 FAIL。
+        write_v2(mode="review", method="ATDD", evidence="missing.txt")
+        assert any("ATDD 证据文件不存在" in e for e in module.validate(v2, "review"))
+
+        # BDD：验收必须写成 Given-When-Then。
+        write_v2(mode="review", method="ATDD", acceptance="已经验证过了")
+        assert any("Given-When-Then" in e for e in module.validate(v2, "review"))
+
+        # 老卡无 schema：同样内容不应被严格规则拦下。
+        v2.write_text(
+            "\n".join(
+                [
+                    "ticket_id: OLD-1",
+                    "goal: 老卡",
+                    "mode: plan",
+                    "method: SDD",
+                    "scope: 输入输出边界",
+                    "write_whitelist: tests/test_x.py",
+                    "acceptance: Given A，When B，Then C",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        assert module.validate(v2, "plan") == [], module.validate(v2, "plan")
+
+    print("PASS: flow-gate enforces four-phase modes, goal alias and v2 artifacts")
 
 
 if __name__ == "__main__":

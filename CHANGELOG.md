@@ -1,3 +1,32 @@
+## [4.12.0] - 2026-09-22 (理论落地为可验证产物 + 归档回执工具化)
+
+### Added
+- **v2 严格门禁**：`schema: v2` 的任务卡由 `flow-gate.py` 校验真实产物，
+  把 Plan/SDD/TDD/ATDD/BDD 从“字段里有这个词”升级为“磁盘上必须有这个东西”：
+  - Plan/SDD：`scope` 必须写全输入、输出、边界三段；
+  - TDD：`red_test` 必须指向真实存在的失败测试文件；
+  - ATDD：`evidence` 必须指向真实存在的证据文件；
+  - BDD：`acceptance` 必须是 Given-When-Then。
+- **任务归档工具化**：`flow-gc.py --task-archive <ticket> --evidence "<证据>" --apply`
+  移动任务卡并写出标准 `task_archive` JSON 回执；无证据拒绝归档。
+- `audit-flow.py` 新增孤儿回执检测：`history/tasks/` 下无对应 JSON 回执的归档卡会报警。
+
+### Why
+- 用户追问“Plan/SDD/TDD/ATDD/BDD 到底怎么规定执行的”。核查确认旧实现只校验
+  `method` 字段是否包含 `TDD` 这样的字符串——实测可以造出一张完全没有测试的卡，
+  只要写上 `method: TDD` 就过门禁。**理论沦为标签，Agent 每次自行发挥。**
+- 9/19 方案里的“任务归档回执工具化”当时未落地，回执靠手写 Markdown，
+  格式各异且机器读不了，导致归档三问（归档了没/为什么/什么证据）答不上来。
+
+### Compatibility
+- 老卡（无 `schema` 字段）继续走宽松规则，不影响在途任务；
+  v2 只对新卡生效，避免一次性推翻全部历史任务卡。
+
+### Verification
+- `python3 -m py_compile scripts/*.py` 与全部 8 个测试脚本 Exit 0。
+- 实测：v2 卡缺 scope 边界 / red_test 不存在 / evidence 不存在 / 非 Given-When-Then 均被拦；
+  老卡同内容放行；无证据归档被拒；带证据归档生成可解析 JSON 回执。
+
 ## [4.11.0] - 2026-09-22 (日志分页与交接棒结构化版)
 
 ### Fixed

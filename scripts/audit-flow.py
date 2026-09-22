@@ -127,6 +127,34 @@ def audit(root: Path) -> dict:
         if not path.exists():
             result["warnings"].append(f"缺少 flow/{name}/，归档与垃圾分区不规范")
 
+    # 归档任务卡必须有对应 JSON 回执，否则无法回答“归档了没、为什么、什么证据”。
+    archived_tickets = {
+        path.stem
+        for path in (history / "tasks").glob("*.md")
+    } if (history / "tasks").is_dir() else set()
+    receipt_tickets: set[str] = set()
+    receipt_dir = flow / "gc" / "receipts"
+    if receipt_dir.is_dir():
+        for path in receipt_dir.glob("*.json"):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if data.get("operation") == "task_archive" and data.get("ticket_id"):
+                receipt_tickets.add(str(data["ticket_id"]))
+    missing_receipts = sorted(ticket for ticket in archived_tickets if ticket not in receipt_tickets)
+    result["archive_receipts"] = {
+        "archived": len(archived_tickets),
+        "with_receipt": len(archived_tickets) - len(missing_receipts),
+    }
+    if missing_receipts:
+        shown = "、".join(missing_receipts[:5])
+        more = f" 等 {len(missing_receipts)} 张" if len(missing_receipts) > 5 else ""
+        result["warnings"].append(
+            f"归档任务卡缺 JSON 回执：{shown}{more}；"
+            f"请用 `flow-gc.py --task-archive` 归档以生成可追溯回执"
+        )
+
     result["status"] = "error" if result["errors"] else ("warning" if result["warnings"] else "ok")
     return result
 
