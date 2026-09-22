@@ -168,6 +168,16 @@ def main() -> None:
         write_v2(mode="execute", method="TDD")
         assert module.validate(v2, "execute") == [], module.validate(v2, "execute")
 
+        # TDD：存在但不是测试文件（如 README）必须 FAIL——防“随便指一个文件”绕过。
+        (root / "README.md").write_text("说明文档\n", encoding="utf-8")
+        write_v2(mode="execute", method="TDD", red_test="README.md")
+        assert any("不是测试文件或不含断言" in e for e in module.validate(v2, "execute")), module.validate(v2, "execute")
+
+        # TDD：路径像测试但正文没有断言，同样必须 FAIL。
+        (root / "tests" / "empty_test.py").write_text("x = 1\n", encoding="utf-8")
+        write_v2(mode="execute", method="TDD", red_test="tests/empty_test.py")
+        assert any("不是测试文件或不含断言" in e for e in module.validate(v2, "execute")), module.validate(v2, "execute")
+
         # ATDD：证据文件不存在必须 FAIL。
         write_v2(mode="review", method="ATDD", evidence="missing.txt")
         assert any("ATDD 证据文件不存在" in e for e in module.validate(v2, "review"))

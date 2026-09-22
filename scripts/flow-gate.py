@@ -60,6 +60,38 @@ def _is_real_path(card: Path, raw: str) -> bool:
     return False
 
 
+TEST_PATH_RE = re.compile(r"(^|/)(tests?|spec|__tests__)(/|$)|[._-](test|spec)\.", re.IGNORECASE)
+TEST_MARKER_RE = re.compile(
+    r"\b(assert|expect|should|describe|it\(|test\(|unittest|pytest|def test_|func Test)",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_test(card: Path, raw: str) -> bool:
+    """red_test 指向的必须真的是测试：路径像测试，且正文有断言/用例特征。
+
+    只校验“文件存在”会被 `red_test: README.md` 这类写法绕过——
+    实测该写法可以通过旧规则，等于没证明先红后绿。
+    """
+    root = find_project_root(card) or card.parent
+    for token in re.split(r"[\s,，;；]+", raw.strip()):
+        token = token.strip("`（）()[]")
+        if not token or not re.search(r"[/\\.]", token):
+            continue
+        candidate = (root / token).resolve()
+        if not candidate.is_file():
+            continue
+        if not (TEST_PATH_RE.search(token) or candidate.name.startswith("test_")):
+            continue
+        try:
+            body = candidate.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if TEST_MARKER_RE.search(body):
+            return True
+    return False
+
+
 def validate_strict(card: Path, values: dict[str, str], phase: str) -> list[str]:
     """v2 卡的阶段产物校验：每个驱动模式必须有可验证产物。"""
     errors: list[str] = []
@@ -82,6 +114,11 @@ def validate_strict(card: Path, values: dict[str, str], phase: str) -> list[str]
             errors.append("TDD 缺 red_test：必须填写先失败测试的文件路径（先红后绿）")
         elif not _is_real_path(card, red):
             errors.append(f"TDD red_test 指向的文件不存在：{red}")
+        elif not _looks_like_test(card, red):
+            errors.append(
+                f"TDD red_test 不是测试文件或不含断言：{red}；"
+                f"必须指向 tests/ 或 test_*/ 且含 assert/expect/test( 等用例特征"
+            )
 
     # ATDD：review 阶段证据必须落到真实文件，而不是一句“已验证”。
     if phase == "review":
