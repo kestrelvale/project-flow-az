@@ -30,6 +30,7 @@ CARD_KEYS = (
     "objective",
     "mode",
     "method",
+    "scope",
     "write_whitelist",
     "verify_command",
     "acceptance",
@@ -247,6 +248,8 @@ ARCHIVED_HEADING_RE = re.compile(r"归档|Archived|已完成|已废弃|废弃任
 MAX_WHITELIST_PATHS = 8
 MAX_ACCEPTANCE_SCENARIOS = 4
 MAX_ACCEPTANCE_STEPS = 5
+MAX_SCOPE_LINES = 12
+MAX_SCOPE_ITEMS = 8
 
 
 def measure_card_size(card: dict[str, str]) -> list[str]:
@@ -262,6 +265,10 @@ def measure_card_size(card: dict[str, str]) -> list[str]:
     # 验收里用 `→` 串起的长链，意味着单卡要贯通多个独立环节，
     # 这类卡实测必然在一个会话内熔断。
     steps = acceptance.count("→")
+    scope = card.get("scope", "")
+    scope_lines = len([line for line in scope.splitlines() if line.strip()])
+    # scope 里的编号条目就是卡内并列交付物；条目越多，越不可能一次收口。
+    scope_items = len(re.findall(r"(?m)^\s*\d+[.、]", scope))
     if len(paths) > MAX_WHITELIST_PATHS:
         problems.append(
             f"写入白名单 {len(paths)} 条（上限 {MAX_WHITELIST_PATHS}）："
@@ -277,6 +284,16 @@ def measure_card_size(card: dict[str, str]) -> list[str]:
             f"验收链路 {steps} 段（上限 {MAX_ACCEPTANCE_STEPS}）："
             f"单卡要贯通过多环节，应按环节拆卡"
         )
+    if scope_items > MAX_SCOPE_ITEMS:
+        problems.append(
+            f"范围并列交付物 {scope_items} 项（上限 {MAX_SCOPE_ITEMS}）："
+            f"一张卡塞了多个独立目标，应按交付物拆卡"
+        )
+    elif scope_lines > MAX_SCOPE_LINES:
+        problems.append(
+            f"范围描述 {scope_lines} 行（上限 {MAX_SCOPE_LINES}）："
+            f"边界过于宽泛，应缩窄后拆卡"
+        )
     return problems
 
 
@@ -284,10 +301,13 @@ def find_oversized_cards(
     cards: list[tuple[Path, dict[str, str]]],
     active_tasks: list[tuple[str, str]],
 ) -> list[str]:
+    """体量超限即报，不限于活跃区。
+
+    未被当前 plan.md 绑定的卡同样会被后续会话捡起来施工，若只查活跃区，
+    巨卡会躲在 flow/tasks/ 里等到开工才暴雷。
+    """
     reports: list[str] = []
     for path, card in cards:
-        if not card_is_linked(card, active_tasks):
-            continue
         problems = measure_card_size(card)
         if problems:
             ticket = card.get("ticket_id") or path.stem

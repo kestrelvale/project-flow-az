@@ -350,8 +350,51 @@ def main() -> None:
         )
         assert "巨型任务卡" in big.stdout, big.stdout
         assert "验收链路" in big.stdout or "写入白名单" in big.stdout, big.stdout
+
+        # scope 里并列多个交付物同样是巨型卡信号（P0-39 类型的真实形态）。
+        (tasks / "P0-39-multi.md").write_text(
+            "\n".join(
+                [
+                    "ticket_id: P0-39",
+                    "goal: 账号角色权限修复",
+                    "mode: execute",
+                    "method: TDD",
+                    "scope: |",
+                    "  输出：",
+                    *[f"    {i}. 并列交付物 {i}" for i in range(1, 12)],
+                    "write_whitelist: src/a.py",
+                    "verify_command: python3 t.py",
+                    "acceptance: Given A，When B，Then C",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (flow / "plan.md").write_text(
+            "\n".join(
+                [
+                    "# Plan",
+                    "## 当前聚焦待办 (P0)",
+                    "- [ ] P0-39 [账号角色] 账号角色权限修复",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        multi = subprocess.run(
+            [
+                sys.executable,
+                str(BOOT),
+                str(root),
+                "--intent",
+                "账号角色权限修复",
+                "--skip-budget",
+            ],
+            text=True,
+            capture_output=True,
+        )
+        assert "范围并列交付物" in multi.stdout, multi.stdout
         # 收拾该夹具，避免影响后续断言。
         (tasks / "P3-big.md").unlink()
+        (tasks / "P0-39-multi.md").unlink()
         (tasks / "P0-9-dep.md").unlink()
         (tasks / "P0-8-authz.md").unlink()
         (flow / "plan.md").write_text(
