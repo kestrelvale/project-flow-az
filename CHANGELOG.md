@@ -1,3 +1,27 @@
+## [4.13.0] - 2026-09-22 (方法论吸收进模板，skill 按需调用)
+
+### Added
+- **任务卡模板吸收四个成熟 skill 的设计**，把 Plan/SDD、TDD、ATDD、BDD 从口号变成可填写结构：
+  - Plan/SDD：问题陈述、用户故事、实现决策、测试决策、不做的事（取自 `to-spec`）；
+  - Execute/TDD：写明**五拍循环**（写失败测试 → 跑确认失败 → 最小实现 → 跑全绿 → 提交），
+    并新增 `首次失败输出（证明它真失败过）` 字段（取自 `test-driven-development`）；
+  - Review/ATDD：可执行断言 + 不可自动化部分的可复现命令；
+  - Handoff/BDD：Given-When-Then 每条对应一个可观测断言。
+- **按需深挖指引**：任务卡末尾列出四个 skill 的绝对路径，结构不够用时再读原文。
+- `驱动模式与验证策略.md` 增补 TDD 铁律、三种反模式（实现耦合 / 同义反复 / 水平切片）、
+  垂直切片要求，以及四种模式的调用方式对照表。
+- 挂载 `writing-plans`、`executing-plans`、`test-driven-development` 三个 skill 到 Codex 技能目录。
+
+### Why
+- 用户问“有没有写得好的 skill 可直接复用”。核查确认本机已有成套方法论 skill，
+  但其总注入成本约 19KB/任务，且 `to-spec` 强依赖 issue tracker，与本项目文件流不兼容。
+- 按奥卡姆剃刀、矛盾论、孙子兵法评估后选择**方案 2**：只吸收模板结构（常驻约 5KB），
+  深挖能力按需读取原 skill，避免每次任务重复支付注入成本。
+
+### Verification
+- `tests/run-all.sh` 全量 9 项 Exit 0；新增 `tests/test-task-template.py`
+  校验模板自带 v2 字段、已吸收方法论，且填充后四阶段门禁全部放行。
+
 ## [4.12.0] - 2026-09-22 (理论落地为可验证产物 + 归档回执工具化)
 
 ### Added
