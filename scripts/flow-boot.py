@@ -242,6 +242,58 @@ def read_completed_tasks(plan: Path) -> list[str]:
 # plan.md 里这些章节属于“已终结”，其内容应物理归档，不得长期驻留活跃控制面。
 ARCHIVED_HEADING_RE = re.compile(r"归档|Archived|已完成|已废弃|废弃任务")
 
+# 任务体量上限：超过即视为“巨型卡”，必须在 plan 阶段拆成原子卡再施工。
+# 依据：一次会话的预算是 100 次工具调用，超体量的卡必然中途 STOP、任务烂尾。
+MAX_WHITELIST_PATHS = 8
+MAX_ACCEPTANCE_SCENARIOS = 4
+MAX_ACCEPTANCE_STEPS = 5
+
+
+def measure_card_size(card: dict[str, str]) -> list[str]:
+    """暴露体量过大、必然中途熔断的任务卡。
+
+    zhengjie 的 P3 卡把 38 个页面 + 43 个原型节点塞进一张卡，会话跑到
+    100 次工具调用被迫 STOP，任务永远收不了口。这类卡必须在 plan 阶段拆。
+    """
+    problems: list[str] = []
+    paths = split_paths(card.get("write_whitelist", ""))
+    acceptance = card.get("acceptance", "")
+    scenarios = len(re.findall(r"Given", acceptance))
+    # 验收里用 `→` 串起的长链，意味着单卡要贯通多个独立环节，
+    # 这类卡实测必然在一个会话内熔断。
+    steps = acceptance.count("→")
+    if len(paths) > MAX_WHITELIST_PATHS:
+        problems.append(
+            f"写入白名单 {len(paths)} 条（上限 {MAX_WHITELIST_PATHS}）："
+            f"改动面过大，应拆成多张原子卡"
+        )
+    if scenarios > MAX_ACCEPTANCE_SCENARIOS:
+        problems.append(
+            f"验收场景 {scenarios} 个（上限 {MAX_ACCEPTANCE_SCENARIOS}）："
+            f"单卡验收面过大，应按场景拆卡"
+        )
+    if steps > MAX_ACCEPTANCE_STEPS:
+        problems.append(
+            f"验收链路 {steps} 段（上限 {MAX_ACCEPTANCE_STEPS}）："
+            f"单卡要贯通过多环节，应按环节拆卡"
+        )
+    return problems
+
+
+def find_oversized_cards(
+    cards: list[tuple[Path, dict[str, str]]],
+    active_tasks: list[tuple[str, str]],
+) -> list[str]:
+    reports: list[str] = []
+    for path, card in cards:
+        if not card_is_linked(card, active_tasks):
+            continue
+        problems = measure_card_size(card)
+        if problems:
+            ticket = card.get("ticket_id") or path.stem
+            reports.append(f"{ticket}：" + "；".join(problems))
+    return reports
+
 
 def split_paths(raw: str) -> list[str]:
     return [
@@ -547,6 +599,7 @@ def render_start_status(
     parallel_conflicts: list[str],
     dependency_blockers: list[str],
     claim_reports: list[str],
+    oversized_cards: list[str],
 ) -> list[str]:
     status = ["### project-flow 开工状态", "", "## 🎯 当前聚焦待办 (P0)"]
     pending = [(state, title) for state, title in active_tasks if state in {" ", "✕", "x", "X"}]
@@ -576,7 +629,15 @@ def render_start_status(
         status.extend(f"- {report}" for report in claim_reports)
     if dependency_blockers:
         status.extend(f"- {report}" for report in dependency_blockers)
-    if not blockers and not parallel_conflicts and not dependency_blockers and not claim_reports:
+    if oversized_cards:
+        status.append(
+            f"- 巨型任务卡 {len(oversized_cards)} 张：超出单会话预算，"
+            f"必须在 Plan 阶段按场景拆成原子卡，否则必然中途熔断。"
+        )
+        status.extend(f"  - {report}" for report in oversized_cards[:3])
+        if len(oversized_cards) > 3:
+            status.append(f"  - …另有 {len(oversized_cards) - 3} 张。")
+    if not blockers and not parallel_conflicts and not dependency_blockers and not claim_reports and not oversized_cards:
         status.append("- 无")
 
     status.extend(["", "## 🧹 未纳管遗留"])
@@ -730,6 +791,7 @@ def main() -> int:
     bloat_reports = measure_plan_bloat(plan)
     parallel_conflicts = find_parallel_conflicts(cards, active_tasks)
     dependency_blockers = find_dependency_blockers(cards, active_tasks, project_root / "flow")
+    oversized_cards = find_oversized_cards(cards, active_tasks)
     claim_reports = claim_active_tasks(
         project_root / "flow",
         cards,
@@ -751,6 +813,7 @@ def main() -> int:
                 parallel_conflicts,
                 dependency_blockers,
                 claim_reports,
+                oversized_cards,
             )
         )
     )

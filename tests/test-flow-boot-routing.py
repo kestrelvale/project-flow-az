@@ -309,6 +309,66 @@ def main() -> None:
         assert "本会话已认领：P0-9" not in dep_claim.stdout, dep_claim.stdout
         assert not (claims_dir / "P0-9.json").exists(), "依赖未交付的卡不应被认领"
 
+        # 巨型任务卡必须在开工阶段被指出，避免会话跑到预算熔断后任务烂尾。
+        (tasks / "P3-big.md").write_text(
+            "\n".join(
+                [
+                    "ticket_id: P3",
+                    "goal: 企业Web样板端",
+                    "mode: plan",
+                    "method: SDD",
+                    "scope: 输入=企业Web需求；输出=样板端；边界=只读规划",
+                    "write_whitelist: src/a/**, src/b/**, src/c/**, src/d/**, "
+                    "src/e/**, src/f/**, src/g/**, src/h/**, src/i/**",
+                    "verify_command: python3 verify.py",
+                    "acceptance: Given A → B → C → D → E → F → G → H → I，Then 全部通过",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (flow / "plan.md").write_text(
+            "\n".join(
+                [
+                    "# Plan",
+                    "## 当前聚焦待办 (P0)",
+                    "- [ ] P3 [企业Web] 企业Web样板端",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        big = subprocess.run(
+            [
+                sys.executable,
+                str(BOOT),
+                str(root),
+                "--intent",
+                "企业Web样板端",
+                "--skip-budget",
+            ],
+            text=True,
+            capture_output=True,
+        )
+        assert "巨型任务卡" in big.stdout, big.stdout
+        assert "验收链路" in big.stdout or "写入白名单" in big.stdout, big.stdout
+        # 收拾该夹具，避免影响后续断言。
+        (tasks / "P3-big.md").unlink()
+        (tasks / "P0-9-dep.md").unlink()
+        (tasks / "P0-8-authz.md").unlink()
+        (flow / "plan.md").write_text(
+            "\n".join(
+                [
+                    "# Plan",
+                    "## 当前聚焦待办 (P0)",
+                    "- [ ] P0-1 [登录状态修复] 修正登录失效",
+                    "- [ ] P0-2 [支付计划] 只做支付方案规划",
+                    "- [-] P0-3 [登录交付] 已自动验证，待人工验收",
+                    "## 后续排队待办 (Backlog)",
+                    "- [ ] P9-9 [不应路由] 旧 backlog",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
         unregistered = subprocess.run(
             [
                 sys.executable,
