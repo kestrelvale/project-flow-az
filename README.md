@@ -39,7 +39,8 @@
 - **高风险人工决策升级门 (High-Risk Bounded Escalation Gate)**：常规开发一律由 Agent 自动决策并记录；仅在极高风险、破坏性变更或用户明确要求时触发人工决策卡。
 - **全局 Skill 自动热同步机制 (Auto Hot-Sync)**：全局 Skill 升级后，历史老项目在首次触发时自动无损平滑接管升级，永不脱节。
 - **开工状态与收工看板分离**：开工只报当前焦点、路由阻塞、未纳管遗留、待验收计数、待人工决策和回收建议；待验收、归档、本轮决策只在收工阶段输出。
-- **会话预算门禁**：读取真实 session token、缓存、轮次和工具调用数据；WARN/STOP 时给出可复制的新会话接力提示词。
+- **会话预算门禁（柔性阻塞）**：读取真实 session token、缓存、轮次和工具调用数据；WARN 要求回上游 SDD 拆卡，STOP 时把本轮路由降级为 handoff-only（拒绝登记新意图、拒绝施工，进程不失败），并给出可复制的新会话接力提示词。阈值按实测标定在自动压缩区之前（压缩区实测起于 556k，窗口 950k）。
+- **规格点回收台账**：交接与汇报只回收 SDD 蒸馏出的规格点(SPE-n)与待办清单，落 `flow/specs/<ticket>.md`；完成项必须带证据（禁止假销账），未回收项是中断后唯一待办源，已完成项不得重跑。交接棒禁止原样照抄用户消息。
 - **接管失败显式化**：cwd 不在任何已接入项目内时，入口明确报告“未接管”并返回非零，不再静默成功。
 - **四区归档治理**：任务归档、日志轮转、验证垃圾、废弃隔离四类对象分离，所有移动写入 `flow/gc/receipts/` 回执。
 
@@ -303,8 +304,9 @@ skill 会在 `flow/进展.md` 顶部追加一条记录，字段包括：
 | `scripts/audit-flow.py` | 只读检查四状态机、旧格式计划与遗留任务 |
 | `scripts/flow-gc.py` | Verification GC 与日志滚动：验证垃圾进入 `trash/verification/`，过长进展进入 `history/progress/` |
 | `scripts/flow-gate.py` | Plan / Execute / Review / Handoff 任务卡阶段门禁 |
-| `scripts/flow-budget.py` | 读取真实会话 token、缓存、轮次和工具调用，输出 WARN/STOP 与接力提示词 |
-| `scripts/flow-deliver.py` | 生成完整四状态看板、六字段工作汇报与交付验收卡，并落盘 `flow/deliveries/` 回执与 `flow/看板.md` 副本 |
+| `scripts/flow-budget.py` | 读取真实会话 token、缓存、轮次和工具调用，输出 WARN/STOP、SDD 蒸馏交接模板与接力提示词 |
+| `scripts/flow-distill.py` | 规格点台账校验（挡假销账）与交接棒蒸馏校验（挡原样照抄用户消息） |
+| `scripts/flow-deliver.py` | 生成完整四状态看板、六字段工作汇报、规格点回收与交付验收卡，并落盘 `flow/deliveries/` 回执与 `flow/看板.md` 副本 |
 | `assets/templates/` | 注入项目的模板文件 |
 | `assets/templates/MODULE_AGENTS.md` | 子项目局部规则入口模板 |
 | `evals/evals.json` | 单仓、多独立仓库、非破坏接入与运行时合同行为用例 |

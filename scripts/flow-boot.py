@@ -17,6 +17,7 @@ AUDIT_SCRIPT = SKILL_DIR / "scripts" / "audit-flow.py"
 GC_SCRIPT = SKILL_DIR / "scripts" / "flow-gc.py"
 GATE_SCRIPT = SKILL_DIR / "scripts" / "flow-gate.py"
 BUDGET_SCRIPT = SKILL_DIR / "scripts" / "flow-budget.py"
+DISTILL_SCRIPT = SKILL_DIR / "scripts" / "flow-distill.py"
 DELIVER_SCRIPT = SKILL_DIR / "scripts" / "flow-deliver.py"
 
 _GATE_SPEC = importlib.util.spec_from_file_location("flow_gate", GATE_SCRIPT)
@@ -52,6 +53,7 @@ CLAIM_TTL_HOURS = 12
 
 # 交付回执目录：由 flow-deliver.py 写入，是“这一轮真的收过工”的唯一机器凭证。
 DELIVERIES_DIR = "deliveries"
+BUDGET_DIR = "budget"
 # 同时兼容 P0-3、P-FRONT-3、P0-26 这类编号，别只认字母开头的旧写法。
 TICKET_IN_TITLE_RE = re.compile(r"([A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*-\d+)")
 
@@ -302,6 +304,98 @@ def audit_deliveries(flow: Path, pending_tasks: list[str]) -> list[str]:
         shown = "、".join(unknown[:3])
         reports.append(f"  - 无编号条目（无法核对回执）：{shown}")
     return reports
+
+
+def read_pending_stop(flow: Path) -> tuple[Path | None, dict[str, object]]:
+    """最近一次预算 STOP 是否还没被交接棒消化。
+
+    实测 2026-09-21 的 8 个 zhengjie 分端会话：flow-budget.py 每次都判出 STOP
+    （最高累积 371 次工具调用），但只有 1 个会话把接力提示词写进过回复，
+    其余一路施工到单次输入 555k~682k，被 Codex 自动压缩——压缩摘要会把
+    「所有用户消息」回灌成一条消息，正是用户看到的汇报冗余与漂移源。
+    触发层一直是正常的，缺的是把 STOP 落盘并在下一轮强制核销。
+    """
+    receipt_dir = flow / BUDGET_DIR
+    if not receipt_dir.is_dir():
+        return None, {}
+    receipts = sorted(receipt_dir.glob("*-stop.json"))
+    if not receipts:
+        return None, {}
+    latest = receipts[-1]
+    try:
+        data = json.loads(latest.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None, {}
+    # 交接棒是否补上：顶部交接标题与熔断当时不同即视为已交接。
+    title, _ = latest_handoff(flow)
+    if title and title != str(data.get("handoff_head", "")):
+        return None, data
+    return latest, data
+
+
+def render_stop_reports(flow: Path) -> list[str]:
+    receipt, data = read_pending_stop(flow)
+    if receipt is None:
+        return []
+    reasons = "；".join(str(reason) for reason in data.get("reasons", [])[:3])
+    reports = [
+        f"上一轮预算 STOP 未交接：输入 {data.get('input_tokens', 0)} tokens / "
+        f"轮次 {data.get('rounds', 0)} / 工具调用 {data.get('tool_calls', 0)}"
+        + (f"（{reasons}）" if reasons else "")
+    ]
+    reports.append(f"  - 回执：{receipt.relative_to(flow.parent)}")
+    reports.append(
+        "  - 必须补写 flow/进展.md 顶部 SDD 蒸馏交接棒（规格点 SPE-n / 待办 / 证据 / 下一步）"
+        "与 flow/specs/<ticket>.md 规格点台账，并把熔断回执里的接力提示词交给新会话；"
+        "否则本会话继续施工只会把上下文推到自动压缩区。"
+    )
+    return reports
+
+
+def run_distill_checks(project_root: Path, thread_id: str) -> tuple[list[str], list[str]]:
+    """跑 flow-distill 的两道校验，返回（问题, 规格点回收提示）。
+
+    问题会被并进路由阻塞；提示给新会话当唯一待办源——已完成规格点不得重跑，
+    这正是「中断后反复执行同一个需求点」的解药。
+    """
+    if not DISTILL_SCRIPT.is_file():
+        return [], []
+    spec = subprocess.run(
+        [sys.executable, str(DISTILL_SCRIPT), "spec", "--project", str(project_root)],
+        text=True,
+        capture_output=True,
+    )
+    spec_lines = [line for line in (spec.stdout or "").splitlines() if line.strip()]
+    problems = [
+        line.strip()[2:].strip()
+        for line in spec_lines
+        if line.strip().startswith("! ")
+    ]
+    notes: list[str] = []
+    if spec_lines and "无规格点台账" not in spec.stdout:
+        notes.append("### project-flow 规格点回收（续跑唯一待办源）")
+        notes.extend(line for line in spec_lines[1:26])
+    if thread_id:
+        handoff = subprocess.run(
+            [
+                sys.executable,
+                str(DISTILL_SCRIPT),
+                "handoff",
+                "--project",
+                str(project_root),
+                "--thread-id",
+                thread_id,
+            ],
+            text=True,
+            capture_output=True,
+        )
+        if handoff.returncode != 0:
+            problems.extend(
+                line.strip()[2:].strip()
+                for line in (handoff.stdout or "").splitlines()
+                if line.strip().startswith("! ")
+            )
+    return problems, notes
 
 
 # plan.md 里这些章节属于“已终结”，其内容应物理归档，不得长期驻留活跃控制面。
@@ -632,7 +726,21 @@ def route_hint(
     cards: list[tuple[Path, dict[str, str]]],
     unmanaged_tasks: list[tuple[str, str]],
     intent: str = "",
+    blocked: bool = False,
 ) -> list[str]:
+    if blocked:
+        # 柔性阻塞：进程不失败、任务不中断，但本轮路由降级为 handoff-only。
+        # 依据 2026-09-23 取证：P3/P0/P4/P-FRONT-* 会话里 flow-budget 判出 STOP
+        # （最多 16 次）后无人执行，会话一路跑到 556k~682k 被 Codex 自动压缩，
+        # 压缩摘要把全部用户消息回放成 12k~29k 字节的「汇报」。
+        return [
+            "Handoff 路由（柔性阻塞）：上一轮预算 STOP 尚未交接，本轮只允许交接落盘。",
+            "允许：写 flow/进展.md 顶部 SDD 蒸馏交接棒（规格点/待办/证据/下一步）"
+            "+ flow/specs/<ticket>.md 规格点台账，并跑 flow-deliver.py 交付。",
+            "禁止：登记新意图、开新的 Execute 卡、修改业务代码、启停服务。",
+            "解除：交接棒与台账落盘后开新会话，flow-boot.py 自动核销熔断回执。",
+            "任务偏大时不要硬推：回 flow/plan.md 按 SDD 把本卡拆成原子卡，再交给新会话。",
+        ]
     if not cards:
         hints = [
             "未发现任务卡：先按 SDD 在 flow/plan.md 登记 [ ] 原子任务，并创建 flow/tasks/<ticket>.md。",
@@ -745,6 +853,8 @@ def render_start_status(
     oversized_cards: list[str],
     handoff_problems: list[str],
     delivery_reports: list[str],
+    stop_reports: list[str],
+    soft_blocked: bool = False,
 ) -> list[str]:
     status = ["### project-flow 开工状态", "", "## 🎯 当前聚焦待办 (P0)"]
     pending = [(state, title) for state, title in active_tasks if state in {" ", "✕", "x", "X"}]
@@ -822,7 +932,23 @@ def render_start_status(
     else:
         status.append("- 无待验收任务，无需交付回执")
 
+    status.extend(["", "## ⏸ 熔断交接"])
+    if stop_reports:
+        if soft_blocked:
+            status.append(
+                "- 【柔性阻塞】本轮路由已降级为 handoff-only：只允许写交接棒与规格点台账；"
+                "禁止登记新意图、禁止业务施工（进程不失败，解除条件是交接落盘）。"
+            )
+        status.extend(f"- {report}" for report in stop_reports)
+    else:
+        status.append("- 无未交接的预算熔断")
+
     status.extend(["", "## ♻️ 回收建议"])
+    if stop_reports:
+        status.append(
+            "- 上一轮预算已 STOP 但交接棒缺失：先补交接棒并开新会话，"
+            "否则上下文会继续膨胀到自动压缩区，压缩摘要会把全部历史消息回灌造成漂移。"
+        )
     debt = any("查无回执 " in report and "查无回执 0" not in report for report in delivery_reports)
     debt = debt or any("无法识别 " in report and "无法识别 0" not in report for report in delivery_reports)
     if debt:
@@ -872,7 +998,23 @@ def intent_matches(
     return False
 
 
-def render_sdd_gate(intent: str, active_tasks: list[tuple[str, str]], cards: list[tuple[Path, dict[str, str]]]) -> list[str]:
+def render_sdd_gate(
+    intent: str,
+    active_tasks: list[tuple[str, str]],
+    cards: list[tuple[Path, dict[str, str]]],
+    blocked: bool = False,
+) -> list[str]:
+    if blocked:
+        return [
+            "### project-flow SDD 登记门（柔性阻塞）",
+            "",
+            f"- 本轮意图：{intent or '（未提供）'}",
+            "- 状态：上一轮预算 STOP 尚未交接，本轮拒绝登记新意图、拒绝开新任务卡。",
+            "- 先做：把上一轮的规格点与待办蒸馏进 `flow/进展.md` 顶部交接棒与 "
+            "`flow/specs/<ticket>.md`，再开新会话继续。",
+            "- 原因：会话一旦进入压缩区，压缩摘要会把全部历史用户消息回放成汇报，"
+            "新会话只能重读历史，等于熔断白做。",
+        ]
     if not intent:
         return []
     if intent_matches(intent, active_tasks, cards):
@@ -959,17 +1101,26 @@ def main() -> int:
     parallel_conflicts = find_parallel_conflicts(cards, active_tasks)
     dependency_blockers = find_dependency_blockers(cards, active_tasks, project_root / "flow")
     oversized_cards = find_oversized_cards(cards, active_tasks)
+    flow_dir = project_root / "flow"
+    stop_reports = render_stop_reports(flow_dir)
+    soft_blocked = bool(stop_reports)
+    distill_problems, distill_notes = run_distill_checks(project_root, args.thread_id)
     handoff_problems = check_handoff_schema(
-        project_root / "flow", progress_has_stop(project_root / "flow")
+        flow_dir, progress_has_stop(flow_dir) or bool(stop_reports)
     )
+    handoff_problems.extend(distill_problems)
     delivery_reports = audit_deliveries(project_root / "flow", pending_tasks)
-    claim_reports = claim_active_tasks(
-        project_root / "flow",
-        cards,
-        active_tasks,
-        args.thread_id,
-        args.intent,
-        dependency_blockers,
+    claim_reports = (
+        []
+        if soft_blocked
+        else claim_active_tasks(
+            project_root / "flow",
+            cards,
+            active_tasks,
+            args.thread_id,
+            args.intent,
+            dependency_blockers,
+        )
     )
     print(
         "\n".join(
@@ -987,9 +1138,13 @@ def main() -> int:
                 oversized_cards,
                 handoff_problems,
                 delivery_reports,
+                stop_reports,
+                soft_blocked,
             )
         )
     )
+    if distill_notes:
+        print("\n" + "\n".join(distill_notes))
     print("\nproject-flow 接管路由")
     print(f"- 项目: {project_root}")
     if active_tasks:
@@ -1010,9 +1165,9 @@ def main() -> int:
         print("- 任务卡: 无")
     if args.intent:
         print(f"- 本轮意图: {args.intent}")
-    for hint in route_hint(active_tasks, cards, unmanaged_tasks, args.intent):
+    for hint in route_hint(active_tasks, cards, unmanaged_tasks, args.intent, soft_blocked):
         print(f"- 路由: {hint}")
-    sdd_gate = render_sdd_gate(args.intent, active_tasks, cards)
+    sdd_gate = render_sdd_gate(args.intent, active_tasks, cards, soft_blocked)
     if sdd_gate:
         print("\n" + "\n".join(sdd_gate))
     budget_code = 0
@@ -1024,6 +1179,8 @@ def main() -> int:
                 "--intent",
                 args.intent or "继续当前 project-flow 活跃任务",
                 *(["--thread-id", args.thread_id] if args.thread_id else []),
+                "--project",
+                str(project_root),
             ],
             text=True,
         )

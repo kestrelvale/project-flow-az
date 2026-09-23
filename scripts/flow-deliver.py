@@ -6,10 +6,13 @@ import argparse
 import importlib.util
 import json
 import re
+import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 
 GATE_SCRIPT = Path(__file__).resolve().parent / "flow-gate.py"
+DISTILL_SCRIPT = Path(__file__).resolve().parent / "flow-distill.py"
 spec = importlib.util.spec_from_file_location("flow_gate", GATE_SCRIPT)
 assert spec and spec.loader
 FLOW_GATE = importlib.util.module_from_spec(spec)
@@ -23,6 +26,25 @@ STATE_RE = re.compile(r"^\s*[-*]\s*\[([ \-✓✕xX])\]\s+(.+?)\s*$")
 # 落盘后 flow-boot.py 才有依据对“已进待验收却从未交付”的债务开火。
 DELIVERIES_DIR = "deliveries"
 BOARD_FILE = "看板.md"
+
+# decisions.md 是累积流水，实测 zhengjie-hrm 已达 164739 字节 / 1498 行 / 114 条，
+# 而收工只要最后 3 条。全量读入等于每次交付都把整部决策史灌进上下文，
+# 是压缩漂移的主要燃料之一。只读尾部即可。
+MAX_DECISIONS_TAIL_BYTES = 32_000
+
+
+def tail_lines(path: Path, limit_bytes: int) -> list[str]:
+    """只读日志尾部的行，避免累积型文件被全量灌进上下文。"""
+    with path.open("rb") as handle:
+        handle.seek(0, 2)
+        size = handle.tell()
+        start = max(0, size - limit_bytes)
+        handle.seek(start)
+        raw = handle.read()
+    text = raw.decode("utf-8", errors="replace")
+    if start > 0:
+        text = text.split("\n", 1)[-1]  # 丢掉被字节切点截断的首行
+    return text.splitlines()
 
 
 def locate_flow(card: Path) -> Path:
@@ -118,6 +140,53 @@ def render_work_summary(
     return "\n".join(lines)
 
 
+def collect_specs(flow: Path, card: dict[str, str]) -> tuple[list[str], str]:
+    """回收规格点/待办台账，返回（问题, 段落）。
+
+    用户要求：汇报必须逐条回收规格点与 to-do 清单，否则任务中断后同一个需求点
+    会被反复执行。台账存在但不合格（格式错 / 完成项无证据 = 假销账）时拒绝交付。
+    """
+    if not DISTILL_SCRIPT.is_file():
+        return [], ""
+    ticket = (card.get("ticket_id") or "").strip()
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(DISTILL_SCRIPT),
+            "spec",
+            "--project",
+            str(flow.parent),
+            "--ticket",
+            ticket,
+        ],
+        text=True,
+        capture_output=True,
+    )
+    output = (result.stdout or "").strip()
+    if not output or "无规格点台账" in output:
+        return [], ""
+    problems = [
+        line.strip()[2:].strip() for line in output.splitlines() if line.strip().startswith("! ")
+    ]
+    rows = [line.strip() for line in output.splitlines() if line.strip().startswith("- [")]
+    summary = [
+        line.strip()
+        for line in output.splitlines()
+        if line.strip().startswith("- 规格点")
+    ]
+    if not rows and not problems:
+        return [], ""
+    lines = ["### ♻️ 规格点回收（中断后只做未回收项，已完成项不得重跑）", ""]
+    lines.extend(summary)
+    lines.extend(rows)
+    pending = [row for row in rows if not row.startswith("- [x]")]
+    if pending:
+        lines.append(f"- 未回收 {len(pending)} 条：任务保持 `[-]` 待验收，不得标记完成。")
+    else:
+        lines.append("- 全部规格点已回收。")
+    return problems, "\n".join(lines)
+
+
 # 收工看板是固定四分区契约：标题永远存在，空分区显式写“无”。
 # 早期实现直接照抄各项目 plan.md 的自定义标题，导致标题随项目漂移、
 # 任务全部归档后整块看板变空——这正是汇报不稳定的根因。
@@ -187,22 +256,35 @@ def main() -> int:
     args = parser.parse_args()
     plan = args.plan or locate_plan(args.card)
     card = parse_card(args.card)
-    block = "\n\n".join(
-        [
-            render_plan_sections(plan),
-            render_work_summary(
-                args.what,
-                args.why,
-                args.understanding,
-                args.outputs,
-                args.problem,
-                args.next_step,
-            ),
-            render(card, args.changed, args.evidence),
-        ]
-    )
+    flow = locate_flow(args.card)
+    spec_problems, spec_section = collect_specs(flow, card)
+    if spec_problems:
+        print("project-flow 拒绝交付：规格点台账不合格", file=sys.stderr)
+        for problem in spec_problems:
+            print(f"! {problem}", file=sys.stderr)
+        print(
+            ">>> 先修台账（flow/specs/<ticket>.md）再交付：完成项必须带证据，"
+            "不得假销账。",
+            file=sys.stderr,
+        )
+        return 1
+    sections = [
+        render_plan_sections(plan),
+        render_work_summary(
+            args.what,
+            args.why,
+            args.understanding,
+            args.outputs,
+            args.problem,
+            args.next_step,
+        ),
+    ]
+    if spec_section:
+        sections.append(spec_section)
+    sections.append(render(card, args.changed, args.evidence))
+    block = "\n\n".join(sections)
     print(block)
-    receipt, board = persist_delivery(locate_flow(args.card), card, block)
+    receipt, board = persist_delivery(flow, card, block)
     print()
     print(">>> 以上三段必须原样粘贴到回复，不得改写、不得只写摘要。")
     print(f">>> 交付回执：{receipt}")

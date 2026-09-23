@@ -195,6 +195,33 @@ def main() -> None:
         assert board_copy.is_file(), board_copy
         assert "任务状态看板" in board_copy.read_text(encoding="utf-8")
 
+        # 汇报必须回收规格点/待办：否则中断后同一个需求点会被反复执行。
+        specs = run_root / "flow" / "specs"
+        specs.mkdir()
+        (specs / "T-9.md").write_text(
+            "\n".join(
+                [
+                    "- [x] SPE-1 | 登录四态 | 证据：pytest exit 0",
+                    "- [ ] SPE-2 | 附件真实上传 | 证据：",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        problems, section = module.collect_specs(
+            run_root / "flow", module.parse_card(run_card)
+        )
+        assert problems == [], problems
+        assert "规格点回收" in section, section
+        assert "SPE-2" in section and "未回收 1 条" in section, section
+        assert "不得标记完成" in section, section
+
+        # 假销账（标完成却没证据）必须拒绝交付，不能把未销账的活当完成。
+        (specs / "T-9.md").write_text(
+            "- [x] SPE-1 | 登录四态 | 证据：\n", encoding="utf-8"
+        )
+        problems, _ = module.collect_specs(run_root / "flow", module.parse_card(run_card))
+        assert any("假销账" in item for item in problems), problems
+
     print("PASS: flow-deliver emits a complete acceptance card")
 
 
