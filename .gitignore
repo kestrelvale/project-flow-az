@@ -18,8 +18,16 @@
 __pycache__/
 *.pyc
 
-# Runtime output if someone runs the skill inside the skill repo by mistake
-/flow/
+# Runtime output only. 注意（2026-09-23 修正）：
+# 原先整目录忽略 /flow/，导致「在 skill 仓库里做修复」时控制面不进版本库，
+# 换一个 checkout 就 flow-boot 报「未接管」，接不了活。
+# 现在只忽略运行时产物，保留控制面（plan/进展/tasks/specs/规范/decisions 等）纳入版本管理。
+/flow/budget/
+/flow/gc/
+/flow/trash/
+/flow/history/
+/flow/看板.md
+/flow/deliveries/
 /docs/
 /src/
 /AGENTS.md
