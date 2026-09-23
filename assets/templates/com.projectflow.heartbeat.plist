@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.projectflow.heartbeat</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>python3</string>
+    <string>/Users/chinkinoko/.codex/skills/project-flow-az/scripts/flow-heartbeat.py</string>
+    <string>--notify</string>
+    <string>--quiet</string>
+    <string>--hours</string>
+    <string>2</string>
+  </array>
+  <key>StartInterval</key><integer>900</integer>
+  <key>RunAtLoad</key><false/>
+  <key>StandardOutPath</key><string>/Users/chinkinoko/.codex/project-flow-heartbeat.out</string>
+  <key>StandardErrorPath</key><string>/Users/chinkinoko/.codex/project-flow-heartbeat.err</string>
+</dict>
+</plist>

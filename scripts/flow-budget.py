@@ -309,6 +309,11 @@ def main() -> int:
         default=None,
         help=argparse.SUPPRESS,
     )
+    parser.add_argument(
+        "--read-only",
+        action="store_true",
+        help="只读模式：不写熔断回执、不写检查点（供外部心跳/巡检调用）",
+    )
     args = parser.parse_args()
 
     if not args.thread_id:
@@ -323,7 +328,7 @@ def main() -> int:
     prompt = handoff_prompt(args.intent, report)
     # 熔断回执只由「开工那一次预算判定」写：中段复查每 50 次工具调用跑一次，
     # 若也写回执，flow/budget/ 会被重复回执刷爆，「最近一次 STOP」判定随即失真。
-    if report["level"] == "STOP" and not args.guard:
+    if report["level"] == "STOP" and not args.guard and not args.read_only:
         receipt = persist_stop(Path(args.project), args.thread_id, report, prompt)
         if receipt is not None:
             report["stop_receipt"] = str(receipt)
@@ -331,7 +336,7 @@ def main() -> int:
         # 中段复查：一个 turn 内跑几百次工具调用时，开工那一次预算判定早就过期了。
         # 无 Hook 的前提下，只能把「复查」做成一条可以被明确调用的命令。
         checkpoint = Path(args.project) / "flow" / BUDGET_DIR / GUARD_FILE
-        if checkpoint.parent.is_dir():
+        if checkpoint.parent.is_dir() and not args.read_only:
             checkpoint.write_text(
                 json.dumps(
                     {
