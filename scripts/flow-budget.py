@@ -466,6 +466,40 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    if args.print_relay:
+        # 闭环缺口修复（2026-09-23 ATDD 发现）：--print-relay 曾经要求先解析到 session，
+        # 解析不到就直接返回——而「换线程/会话已归档/新会话想拿回提示词」正是它的主用途。
+        # 现在只要有熔断回执就先把提示词交出来，会话解析失败只作为附注。
+        receipt, data = latest_stop_receipt(Path(args.project))
+        stored = str(data.get("handoff_prompt") or "").strip()
+        if args.intent and stored:
+            stored = re.sub(
+                r'(--intent\s+")[^"]*(")',
+                lambda m: m.group(1) + args.intent + m.group(2),
+                stored,
+            )
+        if not stored and receipt is not None:
+            # 降级：回执存在但没带 handoff_prompt（老版本写的回执）→ 用当前会话实时生成一份，
+            # 而不是直接说「没有回执」。ATDD 用例 4 就是踩到这条。
+            sessions_for_prompt = find_session_files(args.thread_id, args.sessions_root)
+            if sessions_for_prompt:
+                stored = handoff_prompt(
+                    args.intent or DEFAULT_INTENT, summarize_thread(sessions_for_prompt)
+                )
+                print("project-flow 接力提示词（复制给新会话）")
+                print(stored)
+                print(f"\n- 来源：{receipt}（{data.get('stopped_at', '')}）｜回执缺 handoff_prompt，已按当前会话实时生成")
+                return 0
+        if stored:
+            print("project-flow 接力提示词（复制给新会话）")
+            print(stored)
+            print(f"\n- 来源：{receipt}（{data.get('stopped_at', '')}）")
+            return 0
+        print("project-flow 接力提示词: 该项目没有熔断回执，且当前会话解析失败")
+        print(f"- 项目：{Path(args.project).resolve()}")
+        print(f"- thread-id：{args.thread_id or '（未提供）'}")
+        print("- 先跑一次带 --intent 的 flow-boot.py，或确认 CODEX_THREAD_ID 存在。")
+        return 0
     if not args.thread_id:
         print("project-flow 预算: 无法定位当前会话（缺少 CODEX_THREAD_ID）")
         return 0
