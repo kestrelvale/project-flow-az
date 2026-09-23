@@ -65,8 +65,9 @@ def _rotate_progress(flow: Path, apply: bool) -> list[str]:
     destination = flow / "history" / "progress" / f"进展_{datetime.now():%Y%m}.md"
     moved = sum(1 for index in headings if index >= cutoff)
     message = f"进展.md: 滚动 {moved} 条旧记录 -> {destination.relative_to(flow.parent)}"
-    # 单条本身就可能超过保留阈值，此时只保证最新一条留在活跃区，
-    # 由交接规范（≤1200 字节）约束它不能写成巨块。
+    # 单条本身就可能超过保留阈值，此时只保证最新一条留在活跃区。
+    # 注意：交接棒**不再有字节上限**（v4.15.16）——这里只提示「记录太长、考虑滚动」，
+    # 不再要求作者压缩内容；防复述由 flow-distill 的照抄检测承担。
     if len("".join(lines[cutoff:]).encode("utf-8")) > MAX_PROGRESS_BYTES:
         message += "（最新一条仍超阈值，请按交接规范精简）"
     if apply:

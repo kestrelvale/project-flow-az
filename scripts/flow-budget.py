@@ -399,6 +399,8 @@ def last_visible_reply(paths: list[Path]) -> str:
     return ""
 
 
+# 与 flow-boot.py 同款编号识别（P0-3 / P-FRONT-3 / W2-P4-… 都要认）。
+TICKET_IN_TITLE_RE = re.compile(r"([A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*-\d+)")
 RELAY_MARKERS = ("接力提示词", "flow-boot.py", "--intent")
 
 
@@ -407,18 +409,47 @@ def relay_prompt_visible(reply: str) -> bool:
     return bool(reply) and all(marker in reply for marker in RELAY_MARKERS)
 
 
-def handoff_prompt(intent: str, report: dict) -> str:
+def current_ticket(project: Path | None) -> str:
+    """从顶部交接棒标题里取 ticket（取不到返回空串）。
+
+    接力提示词必须点名**具体**任务卡：只写 `<ticket>` 占位符时，新会话得自己去
+    plan/claims/git worktree 里翻（2026-09-24 实测 thread 01a0d08b 翻了 75 次工具调用）。
+    """
+    if project is None:
+        return ""
+    progress = Path(project) / "flow" / "进展.md"
+    if not progress.is_file():
+        return ""
+    for line in progress.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.startswith(("## ", "### ")):
+            # 先砍掉 `thread=<uuid>` 段：UUID 尾部（a0c1cd-a264-7321-8779-8440…）会被
+            # 编号正则误当成 ticket，生成一条指向不存在任务卡的接力提示词
+            # （2026-09-24 实测：标题无 ticket 时提取出 `a0c1cd-a264-7321-8779-8440`）。
+            match = TICKET_IN_TITLE_RE.search(line.split("thread=")[0])
+            return match.group(1) if match else ""
+    return ""
+
+
+def handoff_prompt(intent: str, report: dict, project: Path | None = None) -> str:
+    root = str(Path(project).resolve()) if project is not None else "<工作根>"
+    ticket = current_ticket(project) or "<ticket>"
     return "\n".join(
         [
-            "继续执行 project-flow 任务，请先按硬首动运行：",
+            "继续执行 project-flow 任务。",
+            f"工作根：{root}",
+            "（若当前 cwd 不是这个工作根，先 `cd` 过去再执行下一条；不要在别的 checkout 上开工）",
+            "",
+            "请先按硬首动运行：",
             f'python3 ~/.codex/skills/project-flow-az/scripts/flow-boot.py . --intent "{intent}"',
             "",
-            "然后只读取：",
-            "- flow/plan.md 当前聚焦 [ ]/[✕]",
-            "- flow/进展.md 顶部一条",
-            "- 当前任务对应的 flow/tasks/<ticket>.md",
-            "- flow/specs/<ticket>.md 里状态不是 [x] 的规格点（只做未回收项）",
-            "- 与当前任务类型匹配的 flow/规范/*.md",
+            "然后只读取（都在上面的工作根下）：",
+            f"- {root}/flow/plan.md 当前聚焦 [ ]/[✕]",
+            f"- {root}/flow/进展.md 顶部一条",
+            f"- 本次任务卡：{root}/flow/tasks/{ticket}.md",
+            f"- 规格点台账：{root}/flow/specs/{ticket}.md（只做状态不是 [x] 的规格点）",
+            f"- 与当前任务类型匹配的 {root}/flow/规范/*.md",
+            "",
+            "只做上面这条任务卡对应的未回收规格点；不要遍历其它任务卡、其它工作区或历史归档。",
             "",
             "上一会话已触发预算熔断：",
             f"- 单次输入: {report['input_tokens']} tokens",
@@ -494,7 +525,9 @@ def main() -> int:
             sessions_for_prompt = find_session_files(args.thread_id, args.sessions_root)
             if sessions_for_prompt:
                 stored = handoff_prompt(
-                    args.intent or DEFAULT_INTENT, summarize_thread(sessions_for_prompt)
+                    args.intent or DEFAULT_INTENT,
+                    summarize_thread(sessions_for_prompt),
+                    Path(args.project),
                 )
                 print("project-flow 接力提示词（复制给新会话）")
                 print(stored)
@@ -522,7 +555,7 @@ def main() -> int:
     report["session_file"] = str(sessions[0])
     # 第 3 点：提示词是否已出现在那一轮的对外回复里。放进报告，外部心跳才能体检。
     report["relay_prompt_in_reply"] = relay_prompt_visible(last_visible_reply(sessions))
-    prompt = handoff_prompt(args.intent or DEFAULT_INTENT, report)
+    prompt = handoff_prompt(args.intent or DEFAULT_INTENT, report, Path(args.project))
     if args.print_relay:
         # 「要求交接却没有交接提示词」的正面修复：无论当前会话判级如何，
         # 先把要交给新会话的那段话原样打出来。

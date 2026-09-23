@@ -5,10 +5,11 @@
 
 ## 🎯 当前聚焦待办 (P0)
 
-- 无（PFP-STOP-RECEIPT-SELFREF-20260924 已交付，等人工验收后归档）
+- 无（PFP-RELAY-CLARITY-20260924 已交付，等人工验收后归档）
 
 ## ⏳ 待人工验收 (Pending Verification)
 
+- [-] PFP-RELAY-CLARITY-20260924 [P0] 等人工验收：撤掉交接棒字节上限 + 接力提示词自包含（工作根绝对路径 + 具体 ticket 路径，实测修复 UUID 被误当 ticket）（v4.15.16）。
 - [-] PFP-STOP-RECEIPT-SELFREF-20260924 [P0] 等人工验收：熔断回执自引用不再永久阻塞接手的新会话
   （`read_pending_stop` 用上一条回执快照作对照），负面「熔断后未落新交接棒」仍 fail-closed（v4.15.15）。
 - [-] PFP-ORPHAN-RECEIPT-20260923 [P1] 等人工验收：孤儿熔断回执可显式作废，
