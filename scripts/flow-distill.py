@@ -19,7 +19,9 @@ SPEC_DIR = "specs"
 SPEC_LINE = re.compile(r"^\s*[-*]\s*\[([ x\-!])\]\s*(SPE-\d+)\s*\|\s*(.*?)\s*\|\s*证据：\s*(.*)$")
 OK_STATES = (" ", "x", "-", "!")
 SHINGLE = 32
-# 蒸馏产物应当远低于这两条线；触发说明是「整段照抄」而不是「引用了一个路径」。
+# 主判据是「最长连续照抄」：实测 P4 真实回放块（12942 字符）的照抄比例只有 26%
+# ——因为它边叙述边摘抄，比例被稀释——但最长连续照抄达 958 字符，一判即中。
+# 比例只作辅助（防止「拆碎了copy」绕过）。调参时不要删掉串长这条。
 MAX_COPIED_RATIO = 0.60
 MAX_COPIED_RUN = 400
 DISTILL_MARKERS = ("规格点", "SPE-", "待办", "TODO", "- [ ]", "- [x]")
@@ -187,8 +189,11 @@ def main() -> int:
     flow = args.project.resolve() / "flow"
     if args.mode == "handoff":
         if not args.thread_id:
-            print("flow-distill: handoff 校验需要 --thread-id")
-            return 0
+            # 不能把「测不了」当成「通过」：缺 thread-id 时无法取到照抄比对源，
+            # 此时必须显式告警并判失败，否则调用方会以为照抄检测跑过了。
+            print("project-flow 交接棒蒸馏校验")
+            print("! 缺少 --thread-id：无法取用户消息做照抄比对，交接棒不得视为通过。")
+            return 1
         problems = check_handoff(flow, args.thread_id, args.sessions_root)
         if problems:
             print("project-flow 交接棒蒸馏校验")

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -306,7 +307,36 @@ def audit_deliveries(flow: Path, pending_tasks: list[str]) -> list[str]:
     return reports
 
 
-def read_pending_stop(flow: Path) -> tuple[Path | None, dict[str, object]]:
+def handoff_is_acceptable(flow: Path, thread_id: str = "") -> bool:
+    """核销熔断的交接棒质量门槛：字段齐备 + SDD 蒸馏 + 不是照抄用户消息。
+
+    只比对「顶部标题是否变了」能被一句话绕过——实测写一条
+    `## 2026-09-23 · T1 · 交了` + `- 干了点活` 就能解除柔性阻塞继续施工，
+    机制等于形同虚设。所以核销必须走校验，而不是只看标题。
+
+    thread_id 必须传真实值：照抄检测要拿本线程的用户消息当比对源，
+    传假 id 会让比对源为空、照抄检测恒真，等于把这道门悄悄关掉。
+    """
+    if not DISTILL_SCRIPT.is_file():
+        return True
+    args = [
+        sys.executable,
+        str(DISTILL_SCRIPT),
+        "handoff",
+        "--project",
+        str(flow.parent),
+    ]
+    if thread_id:
+        args.extend(["--thread-id", thread_id])
+    result = subprocess.run(
+        args,
+        text=True,
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def read_pending_stop(flow: Path, thread_id: str = "") -> tuple[Path | None, dict[str, object]]:
     """最近一次预算 STOP 是否还没被交接棒消化。
 
     实测 2026-09-21 的 8 个 zhengjie 分端会话：flow-budget.py 每次都判出 STOP
@@ -326,15 +356,20 @@ def read_pending_stop(flow: Path) -> tuple[Path | None, dict[str, object]]:
         data = json.loads(latest.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None, {}
-    # 交接棒是否补上：顶部交接标题与熔断当时不同即视为已交接。
+    # 交接棒是否补上：标题与熔断当时不同 **且** 通过蒸馏/字段校验才算已交接。
+    # 只看标题会被一句占位标题绕过（见 handoff_is_acceptable 注释）。
     title, _ = latest_handoff(flow)
-    if title and title != str(data.get("handoff_head", "")):
+    if (
+        title
+        and title != str(data.get("handoff_head", ""))
+        and handoff_is_acceptable(flow, thread_id)
+    ):
         return None, data
     return latest, data
 
 
-def render_stop_reports(flow: Path) -> list[str]:
-    receipt, data = read_pending_stop(flow)
+def render_stop_reports(flow: Path, thread_id: str = "") -> list[str]:
+    receipt, data = read_pending_stop(flow, thread_id)
     if receipt is None:
         return []
     reasons = "；".join(str(reason) for reason in data.get("reasons", [])[:3])
@@ -1051,6 +1086,10 @@ def main() -> int:
         print("- 请切换到项目根目录后重新运行 flow-boot.py。")
         return 1
 
+    # thread-id 兜底：AGENTS.md 只要求传 --intent，若不补 CODEX_THREAD_ID，
+    # 交接棒核销会因为取不到用户消息比对源而判失败 → 柔性阻塞永远解不开。
+    thread_id = args.thread_id or os.environ.get("CODEX_THREAD_ID", "")
+
     global_version = read_version(SKILL_DIR / "VERSION")
     project_version = read_version(project_root / "flow" / "规范" / "VERSION")
     sync = subprocess.run(
@@ -1102,9 +1141,9 @@ def main() -> int:
     dependency_blockers = find_dependency_blockers(cards, active_tasks, project_root / "flow")
     oversized_cards = find_oversized_cards(cards, active_tasks)
     flow_dir = project_root / "flow"
-    stop_reports = render_stop_reports(flow_dir)
+    stop_reports = render_stop_reports(flow_dir, thread_id)
     soft_blocked = bool(stop_reports)
-    distill_problems, distill_notes = run_distill_checks(project_root, args.thread_id)
+    distill_problems, distill_notes = run_distill_checks(project_root, thread_id)
     handoff_problems = check_handoff_schema(
         flow_dir, progress_has_stop(flow_dir) or bool(stop_reports)
     )
@@ -1117,7 +1156,7 @@ def main() -> int:
             project_root / "flow",
             cards,
             active_tasks,
-            args.thread_id,
+            thread_id,
             args.intent,
             dependency_blockers,
         )
@@ -1170,6 +1209,13 @@ def main() -> int:
     sdd_gate = render_sdd_gate(args.intent, active_tasks, cards, soft_blocked)
     if sdd_gate:
         print("\n" + "\n".join(sdd_gate))
+    print("\nproject-flow 会话预算检查点")
+    print(
+        "- 中段复查：本会话每 50 次工具调用复跑一次 "
+        "`python3 ~/.codex/skills/project-flow-az/scripts/flow-budget.py --guard --project .`；"
+        "超线立即交接，不要等到下一轮开工才发现。"
+    )
+    print("- 阈值是「占有效窗口的比例」，随模型自适应；具体数字见下方预算输出。")
     budget_code = 0
     if not args.skip_budget:
         budget = subprocess.run(

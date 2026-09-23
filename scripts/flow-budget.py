@@ -21,19 +21,20 @@ from pathlib import Path
 #      = 58.5% 窗口。这才是用户看到「汇报带上所有用户消息」的真身。
 #   4. 单轮上下文增量实测 p50 30982 / p90 125246 / max 289972，p90 = 13.2% 窗口。
 #
-# 因此 STOP = （实测失效起点 − 一个 p90 轮）= 58.5% − 13.2% ≈ 45%；
-# WARN 取 STOP 的 0.75 倍 ≈ 34%，留出一轮时间做 SDD 拆卡与交接。
-# 这样 272k 模型（有效 258.4k）STOP≈11.6 万，1M 声明模型 STOP≈42.8 万，
-# 都自动落在各自压缩区之前，且各自留 ≥1 个 p90 轮的余量。
-WARN_RATIO = 0.34
-STOP_RATIO = 0.45
-# 实测的模型失效起点（deepseek-v4.1-flash 在 58.5% 窗口处开始回放用户消息），
-# 只用于提示文案与标定锁，不参与判级——判级线是它减去一个 p90 轮得到的 45%。
+# 用户 2026-09-23 拍板：WARN 45% / STOP 50%（要用满窗口）。
+# 代价已量化并记入 CHANGELOG：50% 时距实测失效起点(58.5%)只剩 8.5% 窗口
+# = 950k 下 8.1 万 tokens，而单轮增量 p90 是 12.5 万 → 约 0.65 个 p90 轮；
+# 45% 时是 1.03 个轮。也就是说 50% 线下，一个中等偏重的轮次就可能从 STOP
+# 直接越过失效点，交接还没落地就中招——这是知情的取舍，不是疏漏。
+WARN_RATIO = 0.45
+STOP_RATIO = 0.50
+# 实测的模型失效起点（deepseek-v4.1-flash 在 58.5% 窗口处开始回放用户消息）。
+# 只用于提示文案与标定锁，不参与判级：STOP_RATIO 必须小于它，否则熔断晚于模型失效。
 MODEL_FAILURE_RATIO = 0.585
 # 窗口读不到时（session 缺 model_context_window）才用绝对值兜底：
-# 取实测失效起点 556166 减一个 p90 轮 125246 ≈ 43 万。
-WARN_INPUT_TOKENS = 320_000
-STOP_INPUT_TOKENS = 430_000
+# 按实测中继窗口 950k × 45% / 50% ≈ 42.8 万 / 47.5 万。
+WARN_INPUT_TOKENS = 420_000
+STOP_INPUT_TOKENS = 470_000
 # 轮次与工具调用是漂移兜底：只在高轮次/高调用量但 token 还没顶到线时接棒，
 # 阈值放在 token 线之后，避免再次出现「38% 就报 STOP」的告警疲劳。
 WARN_ROUNDS = 15
@@ -97,8 +98,8 @@ def persist_stop(project: Path, thread_id: str, report: dict, prompt: str) -> Pa
     return receipt
 
 
-def find_session_file(thread_id: str) -> Path | None:
-    root = Path.home() / ".codex" / "sessions"
+def find_session_file(thread_id: str, sessions_root: Path | None = None) -> Path | None:
+    root = sessions_root or (Path.home() / ".codex" / "sessions")
     matches = sorted(root.rglob(f"*{thread_id}*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
     return matches[0] if matches else None
 
@@ -294,22 +295,47 @@ def main() -> int:
     parser.add_argument("--intent", default="继续当前 project-flow 活跃任务")
     parser.add_argument("--project", default=".", help="项目根目录（写熔断回执用）")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument(
+        "--guard",
+        action="store_true",
+        help="中段复查模式：只在超线时输出，供长 turn 内周期性自检（不装 Hook 的替代）",
+    )
+    parser.add_argument(
+        "--sessions-root",
+        type=Path,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
     args = parser.parse_args()
 
     if not args.thread_id:
         print("project-flow 预算: 无法定位当前会话（缺少 CODEX_THREAD_ID）")
         return 0
-    session = find_session_file(args.thread_id)
+    session = find_session_file(args.thread_id, args.sessions_root)
     if session is None:
         print(f"project-flow 预算: 未找到 session jsonl: {args.thread_id}")
         return 0
 
     report = summarize(session)
     prompt = handoff_prompt(args.intent, report)
-    if report["level"] == "STOP":
+    # 熔断回执只由「开工那一次预算判定」写：中段复查每 50 次工具调用跑一次，
+    # 若也写回执，flow/budget/ 会被重复回执刷爆，「最近一次 STOP」判定随即失真。
+    if report["level"] == "STOP" and not args.guard:
         receipt = persist_stop(Path(args.project), args.thread_id, report, prompt)
         if receipt is not None:
             report["stop_receipt"] = str(receipt)
+    if args.guard:
+        # 中段复查：一个 turn 内跑几百次工具调用时，开工那一次预算判定早就过期了。
+        # 无 Hook 的前提下，只能把「复查」做成一条可以被明确调用的命令。
+        if report["level"] == "OK":
+            print("project-flow 中段复查 [OK]：可继续，但每 50 次工具调用再复查一次。")
+            return 0
+        print(f"project-flow 中段复查 [{report['level']}]：立即停止扩展实现。")
+        for reason in report["reasons"]:
+            print(f"- {reason}")
+        print("- 动作：把规格点与待办蒸馏进 flow/进展.md 顶部交接棒 + flow/specs/<ticket>.md，")
+        print("  逐条回收状态与证据，然后开新会话；禁止在本会话继续堆上下文。")
+        return 1
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 1 if report["level"] == "STOP" else 0

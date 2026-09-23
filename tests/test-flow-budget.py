@@ -6,6 +6,8 @@ import importlib.util
 import json
 from pathlib import Path
 import tempfile
+import subprocess
+import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "flow-budget.py"
@@ -71,11 +73,11 @@ def main() -> None:
         normal = root / "normal.jsonl"
         warning = root / "warning.jsonl"
         stopped = root / "stopped.jsonl"
-        # 窗口按实测真值 950k（中继会话统一声明 0.95×1e6）。阈值按比例标定：
-        # 实测模型在 58.5% 窗口处开始回放用户消息，STOP = 58.5% − 一个 p90 轮 ≈ 45%。
+        # 窗口按实测真值 950k（中继会话统一声明 0.95×1e6）。
+        # 用户 2026-09-23 拍板 WARN 45% / STOP 50%（知情取舍，见 CHANGELOG 4.15.2）。
         write_session(normal, 40_000, 30_000, 950_000, 3)
-        write_session(warning, 350_000, 40_000, 950_000, 12)
-        write_session(stopped, 440_000, 0, 950_000, 23)
+        write_session(warning, 440_000, 40_000, 950_000, 12)
+        write_session(stopped, 490_000, 0, 950_000, 23)
 
         normal_report = module.summarize(normal)
         warning_report = module.summarize(warning)
@@ -114,6 +116,34 @@ def main() -> None:
         assert data["handoff_head"] == "## 2026-09-21 · 旧交接棒 · 总控", data
         assert data["tool_calls"] == stopped_report["tool_calls"], data
         assert "接力" in data["handoff_prompt"] or "--intent" in data["handoff_prompt"], data
+
+        # 中段复查（--guard）：长 turn 内周期性自检的唯一手段（AGENTS.md 不装 Hook）。
+        # 超线必须非零；未超线必须零且明确提示复查节奏。
+        script = ROOT / "scripts" / "flow-budget.py"
+        sessions = root / "sessions"
+        sessions.mkdir()
+        (sessions / "rollout-x-thread-guard.jsonl").write_text(
+            (stopped.read_text(encoding="utf-8"), ) [0], encoding="utf-8"
+        )
+        hot = subprocess.run(
+            [sys.executable, str(script), "--thread-id", "thread-guard",
+             "--guard", "--sessions-root", str(sessions), "--project", str(project)],
+            text=True, capture_output=True,
+        )
+        assert hot.returncode == 1, (hot.returncode, hot.stdout, hot.stderr)
+        assert "中段复查 [STOP]" in hot.stdout, hot.stdout
+        assert "立即停止扩展实现" in hot.stdout, hot.stdout
+
+        (sessions / "rollout-x-thread-guard.jsonl").write_text(
+            normal.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+        cool = subprocess.run(
+            [sys.executable, str(script), "--thread-id", "thread-guard",
+             "--guard", "--sessions-root", str(sessions), "--project", str(project)],
+            text=True, capture_output=True,
+        )
+        assert cool.returncode == 0, (cool.returncode, cool.stdout, cool.stderr)
+        assert "每 50 次工具调用" in cool.stdout, cool.stdout
     print("PASS: flow-budget classifies OK/WARN/STOP and emits a handoff prompt")
 
 

@@ -95,6 +95,16 @@ def main() -> None:
         assert "Execute 路由" not in blocked.stdout, blocked.stdout
         assert blocked.returncode == 0, blocked.returncode  # 柔性：进程不失败
 
+        # 绕过回归：只改标题、正文空洞的交接棒**不得**核销熔断。
+        # 实测过：写一句 `## 2026-09-23 · T1 · 交了` + `- 干了点活` 就能解锁继续施工，
+        # 那样整个柔性阻塞形同虚设。核销必须走蒸馏/字段校验。
+        (flow / "进展.md").write_text(
+            "## 2026-09-23 · T1 · 交了\n- 干了点活\n", encoding="utf-8"
+        )
+        bypass = boot(root)
+        assert "【柔性阻塞】" in bypass.stdout, bypass.stdout
+        assert "Handoff 路由（柔性阻塞）" in bypass.stdout, bypass.stdout
+
         # 补上 SDD 蒸馏交接棒 → 熔断回执被核销，阻塞自动解除。
         (flow / "进展.md").write_text(
             "\n".join(
