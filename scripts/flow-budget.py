@@ -50,6 +50,8 @@ BUDGET_DIR = "budget"
 # 检查点文件（覆盖式，不是时间戳堆积）：记录「上一次中段复查时的工具调用数」，
 # 供开工时判断复查节奏是否已经过期。与熔断回执分开——回执只由开工判定写。
 GUARD_FILE = "guard.json"
+# 未显式传 --intent 时接力提示词里写的默认任务描述。
+DEFAULT_INTENT = "继续当前 project-flow 活跃任务"
 
 
 def top_handoff_head(flow: Path) -> str:
@@ -315,7 +317,14 @@ def handoff_prompt(intent: str, report: dict) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--thread-id", default=os.environ.get("CODEX_THREAD_ID", ""))
-    parser.add_argument("--intent", default="继续当前 project-flow 活跃任务")
+    parser.add_argument(
+        "--intent",
+        default="",
+        help=(
+            "本轮任务摘要。""--print-relay"" 时用它覆盖提示词里的 --intent——"
+            "回执里存的是「触发熔断那次开工的意图」，直接粘给新会话会把旧意图当任务。"
+        ),
+    )
     parser.add_argument("--project", default=".", help="项目根目录（写熔断回执用）")
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
@@ -350,12 +359,21 @@ def main() -> int:
         return 0
 
     report = summarize(session)
-    prompt = handoff_prompt(args.intent, report)
+    prompt = handoff_prompt(args.intent or DEFAULT_INTENT, report)
     if args.print_relay:
         # 「要求交接却没有交接提示词」的正面修复：无论当前会话判级如何，
         # 先把要交给新会话的那段话原样打出来。
         receipt, data = latest_stop_receipt(Path(args.project))
         stored = str(data.get("handoff_prompt") or "").strip()
+        if args.intent and stored:
+            # 实测坑（2026-09-23）：回执里那条 --intent 是「触发熔断那次开工的意图」。
+            # 单纯索取提示词时它毫无意义，直接粘给新会话会把旧意图当任务。
+            # 所以允许用「同一个 --intent」覆盖打印出来的那条，不再多造一个参数。
+            stored = re.sub(
+                r'(--intent\s+")[^"]*(")',
+                lambda m: m.group(1) + args.intent + m.group(2),
+                stored,
+            )
         print("project-flow 接力提示词（复制给新会话）")
         print(stored or prompt)
         if receipt is not None:

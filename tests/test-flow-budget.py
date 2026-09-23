@@ -159,6 +159,18 @@ def main() -> None:
         assert "--intent" in relay.stdout, relay.stdout
         assert "熔断" in relay.stdout, relay.stdout
         assert "来源：" in relay.stdout and "stop.json" in relay.stdout, relay.stdout
+
+        # --intent 必须能覆盖提示词里那条「触发熔断时的旧意图」：
+        # 否则索取提示词时会把旧意图粘给新会话当任务（2026-09-23 实测坑）。
+        override = subprocess.run(
+            [sys.executable, str(script), "--thread-id", "thread-guard",
+             "--print-relay", "--intent", "Wave0：门禁去副作用+菜单恢复",
+             "--sessions-root", str(sessions), "--project", str(project)],
+            text=True, capture_output=True,
+        )
+        assert override.returncode == 0, override.stderr
+        assert '--intent "Wave0：门禁去副作用+菜单恢复"' in override.stdout, override.stdout
+        assert "--intent \"继续当前 project-flow 活跃任务\"" not in override.stdout, override.stdout
     print("PASS: flow-budget classifies OK/WARN/STOP and emits a handoff prompt")
 
 

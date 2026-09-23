@@ -1,3 +1,23 @@
+## [4.15.6] - 2026-09-23 (`--print-relay` 支持 `--intent` 覆盖)
+
+### Changed
+- **`--intent` 直接覆盖接力提示词里的意图**（不再单造参数）。`--print-relay` 打印的是
+  熔断回执里存的那句 `--intent`，实测它等于「触发熔断那次开工的意图」——单纯索取提示词时
+  毫无意义，直接粘给新会话会把旧意图当任务。现在：
+  - `--print-relay --intent "Wave0：门禁去副作用+菜单恢复"` → 覆盖打印出来的那条；
+  - 不传 `--intent` → 保持回执原值不变。
+- `--intent` 默认值改为空串，真实默认文案抽成 `DEFAULT_INTENT` 常量。
+
+### 决策记录
+- 该问题原以「写 `docs/DEVELOPMENT_RULES.md` 规则条文（VR-12）」或「改全局 skill」二选一
+  的形式上报给用户。**用户决策：改全局，一次改掉**（各分端同属一个项目，不逐项目写规则条文）。
+
+### Verification
+- `tests/run-all.sh` 全量 14 项 Exit 0；`test-flow-budget.py` 新增断言：
+  `--print-relay --intent "Wave0：…"` 必须覆盖成功，且不得残留默认文案。
+- 真实项目验证（`~/projects/zhengjie-hrm`）：带 `--intent` 时输出 `--intent "Wave0：门禁去副作用+菜单恢复"`；
+  不带时保持 `--intent "P3 交接落盘校验（回执复核）"`。
+
 ## [4.15.5] - 2026-09-23 (修复「要求交接却没有交接提示词」)
 
 ### 诊断结论（用户反馈 + 本机取证）
