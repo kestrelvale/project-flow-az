@@ -63,6 +63,26 @@ def top_handoff_head(flow: Path) -> str:
     return ""
 
 
+def latest_stop_receipt(project: Path) -> tuple[Path | None, dict]:
+    """取最近一条熔断回执（含当时生成的接力提示词）。
+
+    v4.15.4 之前，回执里的 `handoff_prompt` 没有任何入口能读回来：中段复查
+    （--guard）只印一句「动作」，柔性阻塞也只说「必须补写交接棒」，于是用户
+    看到的现象是「要求交接，却没有交接提示词」。回执里明明存了 973 字符。
+    """
+    receipt_dir = project / "flow" / BUDGET_DIR
+    if not receipt_dir.is_dir():
+        return None, {}
+    receipts = sorted(receipt_dir.glob("*-stop.json"))
+    if not receipts:
+        return None, {}
+    latest = receipts[-1]
+    try:
+        return latest, json.loads(latest.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None, {}
+
+
 def persist_stop(project: Path, thread_id: str, report: dict, prompt: str) -> Path | None:
     """把此次 STOP 写成回执，供下一轮开工判定“熔断到底交接了没有”。
 
@@ -314,6 +334,11 @@ def main() -> int:
         action="store_true",
         help="只读模式：不写熔断回执、不写检查点（供外部心跳/巡检调用）",
     )
+    parser.add_argument(
+        "--print-relay",
+        action="store_true",
+        help="只打印可复制的接力提示词（优先取最近熔断回执里存的那份），不判级、不写回执",
+    )
     args = parser.parse_args()
 
     if not args.thread_id:
@@ -326,6 +351,18 @@ def main() -> int:
 
     report = summarize(session)
     prompt = handoff_prompt(args.intent, report)
+    if args.print_relay:
+        # 「要求交接却没有交接提示词」的正面修复：无论当前会话判级如何，
+        # 先把要交给新会话的那段话原样打出来。
+        receipt, data = latest_stop_receipt(Path(args.project))
+        stored = str(data.get("handoff_prompt") or "").strip()
+        print("project-flow 接力提示词（复制给新会话）")
+        print(stored or prompt)
+        if receipt is not None:
+            print(f"\n- 来源：{receipt}（{data.get('stopped_at', '')}）")
+        else:
+            print("\n- 来源：本次会话实时计算（尚无熔断回执）")
+        return 0
     # 熔断回执只由「开工那一次预算判定」写：中段复查每 50 次工具调用跑一次，
     # 若也写回执，flow/budget/ 会被重复回执刷爆，「最近一次 STOP」判定随即失真。
     if report["level"] == "STOP" and not args.guard and not args.read_only:
@@ -361,6 +398,10 @@ def main() -> int:
             print(f"- {reason}")
         print("- 动作：把规格点与待办蒸馏进 flow/进展.md 顶部交接棒 + flow/specs/<ticket>.md，")
         print("  逐条回收状态与证据，然后开新会话；禁止在本会话继续堆上下文。")
+        # 用户反馈「要求交接却没有交接提示词」：中段复查是贴了纠偏词后最常走的路径，
+        # 必须在这里就把可复制的提示词给全，而不是只给一句「动作」。
+        print("\nproject-flow 接力提示词（复制给新会话）")
+        print(prompt)
         return 1
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))

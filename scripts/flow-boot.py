@@ -384,6 +384,12 @@ def render_stop_reports(flow: Path, thread_id: str = "") -> list[str]:
         "与 flow/specs/<ticket>.md 规格点台账，并把熔断回执里的接力提示词交给新会话；"
         "否则本会话继续施工只会把上下文推到自动压缩区。"
     )
+    # 用户反馈「要求交接却没有交接提示词」：回执里存着当时生成的提示词，
+    # 开工时直接贴出来，避免还要再跑一次命令去捞。
+    stored = str(data.get("handoff_prompt") or "").strip()
+    if stored:
+        reports.append("  - 接力提示词（可直接复制给新会话）：")
+        reports.extend(f"    {line}" for line in stored.splitlines())
     return reports
 
 

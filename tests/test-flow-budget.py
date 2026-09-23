@@ -133,6 +133,9 @@ def main() -> None:
         assert hot.returncode == 1, (hot.returncode, hot.stdout, hot.stderr)
         assert "中段复查 [STOP]" in hot.stdout, hot.stdout
         assert "立即停止扩展实现" in hot.stdout, hot.stdout
+        # 用户反馈「要求交接却没有交接提示词」：中段复查必须把可复制的提示词给全。
+        assert "project-flow 接力提示词" in hot.stdout, hot.stdout
+        assert "--intent" in hot.stdout, hot.stdout
 
         (sessions / "rollout-x-thread-guard.jsonl").write_text(
             normal.read_text(encoding="utf-8"), encoding="utf-8"
@@ -144,6 +147,18 @@ def main() -> None:
         )
         assert cool.returncode == 0, (cool.returncode, cool.stdout, cool.stderr)
         assert "每 50 次工具调用" in cool.stdout, cool.stdout
+
+        # --print-relay：按需取回交接提示词；有回执时优先用回执里存的那份。
+        relay = subprocess.run(
+            [sys.executable, str(script), "--thread-id", "thread-guard",
+             "--print-relay", "--sessions-root", str(sessions), "--project", str(project)],
+            text=True, capture_output=True,
+        )
+        assert relay.returncode == 0, (relay.returncode, relay.stderr)
+        assert "project-flow 接力提示词" in relay.stdout, relay.stdout
+        assert "--intent" in relay.stdout, relay.stdout
+        assert "熔断" in relay.stdout, relay.stdout
+        assert "来源：" in relay.stdout and "stop.json" in relay.stdout, relay.stdout
     print("PASS: flow-budget classifies OK/WARN/STOP and emits a handoff prompt")
 
 
