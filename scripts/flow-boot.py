@@ -17,11 +17,17 @@ AUDIT_SCRIPT = SKILL_DIR / "scripts" / "audit-flow.py"
 GC_SCRIPT = SKILL_DIR / "scripts" / "flow-gc.py"
 GATE_SCRIPT = SKILL_DIR / "scripts" / "flow-gate.py"
 BUDGET_SCRIPT = SKILL_DIR / "scripts" / "flow-budget.py"
+DELIVER_SCRIPT = SKILL_DIR / "scripts" / "flow-deliver.py"
 
 _GATE_SPEC = importlib.util.spec_from_file_location("flow_gate", GATE_SCRIPT)
 assert _GATE_SPEC and _GATE_SPEC.loader
 FLOW_GATE = importlib.util.module_from_spec(_GATE_SPEC)
 _GATE_SPEC.loader.exec_module(FLOW_GATE)
+
+_DELIVER_SPEC = importlib.util.spec_from_file_location("flow_deliver", DELIVER_SCRIPT)
+assert _DELIVER_SPEC and _DELIVER_SPEC.loader
+FLOW_DELIVER = importlib.util.module_from_spec(_DELIVER_SPEC)
+_DELIVER_SPEC.loader.exec_module(FLOW_DELIVER)
 
 PLAN_TASK_RE = re.compile(r"^\s*[-*]\s*\[([ \-✕xX])\]\s+(.+?)\s*$")
 CARD_KEYS = (
@@ -43,6 +49,11 @@ CARD_KEYS = (
 FOCUS_HEADING_MARKERS = ("当前聚焦", "当前任务", "施工队列")
 CLAIMS_DIR = "claims"
 CLAIM_TTL_HOURS = 12
+
+# 交付回执目录：由 flow-deliver.py 写入，是“这一轮真的收过工”的唯一机器凭证。
+DELIVERIES_DIR = "deliveries"
+# 同时兼容 P0-3、P-FRONT-3、P0-26 这类编号，别只认字母开头的旧写法。
+TICKET_IN_TITLE_RE = re.compile(r"([A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*-\d+)")
 
 
 def load_claims(flow: Path) -> dict[str, dict[str, object]]:
@@ -240,6 +251,57 @@ def read_completed_tasks(plan: Path) -> list[str]:
         for state, title in tasks
         if state in {"✓", "x", "X"}
     ]
+
+
+def read_delivered_tickets(flow: Path) -> set[str]:
+    """收集 flow/deliveries/ 里的交付回执编号。"""
+    delivered: set[str] = set()
+    receipt_dir = flow / DELIVERIES_DIR
+    if not receipt_dir.is_dir():
+        return delivered
+    for path in receipt_dir.glob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        ticket = str(data.get("ticket_id", "")).strip()
+        if ticket:
+            delivered.add(ticket)
+    return delivered
+
+
+def audit_deliveries(flow: Path, pending_tasks: list[str]) -> list[str]:
+    """待验收任务必须能查到交付回执，否则这一轮根本没走收工流程。
+
+    依据：2026-09-22 的 o2o 会话跑了 7 次 flow-deliver.py，用户可见回复里
+    0 次出现看板；只靠 AGENTS.md 的口头约定管不住。回执让“没交付”变成
+    下次开工必须点名的债务，而不是静默消失。
+    """
+    delivered = read_delivered_tickets(flow)
+    missing: list[str] = []
+    unknown: list[str] = []
+    for title in pending_tasks:
+        match = TICKET_IN_TITLE_RE.search(title)
+        if not match:
+            unknown.append(title.split(":")[0].strip()[:40])
+            continue
+        if match.group(1) not in delivered:
+            missing.append(match.group(1))
+    missing = list(dict.fromkeys(missing))
+    if not pending_tasks:
+        return []
+    reports = [
+        f"待验收 {len(pending_tasks)} 项：有回执 {len(pending_tasks) - len(missing) - len(unknown)}"
+        f" / 查无回执 {len(missing)} / 编号无法识别 {len(unknown)}"
+    ]
+    if missing:
+        reports.extend(f"  - {ticket}：未运行 flow-deliver.py 或回执未落盘" for ticket in missing[:5])
+        if len(missing) > 5:
+            reports.append(f"  - …另有 {len(missing) - 5} 项，详见 flow/{DELIVERIES_DIR}/")
+    if unknown:
+        shown = "、".join(unknown[:3])
+        reports.append(f"  - 无编号条目（无法核对回执）：{shown}")
+    return reports
 
 
 # plan.md 里这些章节属于“已终结”，其内容应物理归档，不得长期驻留活跃控制面。
@@ -682,6 +744,7 @@ def render_start_status(
     claim_reports: list[str],
     oversized_cards: list[str],
     handoff_problems: list[str],
+    delivery_reports: list[str],
 ) -> list[str]:
     status = ["### project-flow 开工状态", "", "## 🎯 当前聚焦待办 (P0)"]
     pending = [(state, title) for state, title in active_tasks if state in {" ", "✕", "x", "X"}]
@@ -753,7 +816,20 @@ def render_start_status(
     else:
         status.append("- 无")
 
+    status.extend(["", "## 📨 交付回执"])
+    if delivery_reports:
+        status.extend(f"- {report}" for report in delivery_reports)
+    else:
+        status.append("- 无待验收任务，无需交付回执")
+
     status.extend(["", "## ♻️ 回收建议"])
+    debt = any("查无回执 " in report and "查无回执 0" not in report for report in delivery_reports)
+    debt = debt or any("无法识别 " in report and "无法识别 0" not in report for report in delivery_reports)
+    if debt:
+        status.append(
+            "- 存在“已进待验收却查无交付回执”的任务：说明收工看板从未生成，"
+            "必须补跑 flow-deliver.py 并把看板贴进回复。"
+        )
     if pending_tasks:
         status.append(
             f"- 待验收积压 {len(pending_tasks)} 项：请逐项确认后归档，或退回修复；不得自动标记通过。"
@@ -886,6 +962,7 @@ def main() -> int:
     handoff_problems = check_handoff_schema(
         project_root / "flow", progress_has_stop(project_root / "flow")
     )
+    delivery_reports = audit_deliveries(project_root / "flow", pending_tasks)
     claim_reports = claim_active_tasks(
         project_root / "flow",
         cards,
@@ -909,6 +986,7 @@ def main() -> int:
                 claim_reports,
                 oversized_cards,
                 handoff_problems,
+                delivery_reports,
             )
         )
     )

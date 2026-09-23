@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import re
+from datetime import datetime
 from pathlib import Path
 
 GATE_SCRIPT = Path(__file__).resolve().parent / "flow-gate.py"
@@ -14,6 +16,45 @@ FLOW_GATE = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(FLOW_GATE)
 parse_card = FLOW_GATE.parse_card
 STATE_RE = re.compile(r"^\s*[-*]\s*\[([ \-✓✕xX])\]\s+(.+?)\s*$")
+
+# 交付回执目录与人工可读看板副本。
+# stdout 只活在工具结果里：实测 2026-09-22 的 o2o 会话里 flow-deliver.py
+# 跑了 7 次，用户可见回复里 0 次出现看板——模型漏贴就彻底丢失。
+# 落盘后 flow-boot.py 才有依据对“已进待验收却从未交付”的债务开火。
+DELIVERIES_DIR = "deliveries"
+BOARD_FILE = "看板.md"
+
+
+def locate_flow(card: Path) -> Path:
+    """任务卡所属的 flow/ 目录，回执与看板都写在这里。"""
+    return locate_plan(card).parent
+
+
+def persist_delivery(flow: Path, card: dict[str, str], block: str) -> tuple[Path, Path]:
+    """把收工汇报落盘：一份 JSON 回执 + 一份人类可读看板副本。"""
+    ticket = (card.get("ticket_id") or "").strip() or "unknown"
+    receipt_dir = flow / DELIVERIES_DIR
+    receipt_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now()
+    board = flow / BOARD_FILE
+    board.write_text(block.rstrip() + "\n", encoding="utf-8")
+    receipt = receipt_dir / f"{stamp:%Y%m%d-%H%M%S}-{ticket}.json"
+    receipt.write_text(
+        json.dumps(
+            {
+                "operation": "delivery",
+                "ticket_id": ticket,
+                "delivered_at": stamp.isoformat(timespec="seconds"),
+                "board_copy": str(board.name),
+                "chars": len(block),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return receipt, board
 
 
 def locate_plan(card: Path) -> Path:
@@ -145,20 +186,27 @@ def main() -> int:
     parser.add_argument("--next-step", default="")
     args = parser.parse_args()
     plan = args.plan or locate_plan(args.card)
-    print(render_plan_sections(plan))
-    print()
-    print(
-        render_work_summary(
-            args.what,
-            args.why,
-            args.understanding,
-            args.outputs,
-            args.problem,
-            args.next_step,
-        )
+    card = parse_card(args.card)
+    block = "\n\n".join(
+        [
+            render_plan_sections(plan),
+            render_work_summary(
+                args.what,
+                args.why,
+                args.understanding,
+                args.outputs,
+                args.problem,
+                args.next_step,
+            ),
+            render(card, args.changed, args.evidence),
+        ]
     )
+    print(block)
+    receipt, board = persist_delivery(locate_flow(args.card), card, block)
     print()
-    print(render(parse_card(args.card), args.changed, args.evidence))
+    print(">>> 以上三段必须原样粘贴到回复，不得改写、不得只写摘要。")
+    print(f">>> 交付回执：{receipt}")
+    print(f">>> 看板副本：{board}")
     return 0
 
 

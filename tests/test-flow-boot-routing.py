@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import os
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -137,6 +138,35 @@ def main() -> None:
         assert "## ⏳ 待人工验收" not in boot.stdout, boot.stdout
         assert "## 📦 已完结归档" not in boot.stdout, boot.stdout
         assert "## 💡 本轮决策" not in boot.stdout, boot.stdout
+
+        # 待验收任务查不到交付回执 → 开学时必须点名，不能让看板静默消失。
+        assert "## 📨 交付回执" in boot.stdout, boot.stdout
+        assert "P0-3：未运行 flow-deliver.py 或回执未落盘" in boot.stdout, boot.stdout
+        assert "已进待验收却查无交付回执" in boot.stdout, boot.stdout
+
+        # 补上回执后债务必须消失，否则门禁会退化成永久噪音。
+        receipts = flow / "deliveries"
+        receipts.mkdir(parents=True, exist_ok=True)
+        (receipts / "20260923-120000-P0-3.json").write_text(
+            json.dumps({"operation": "delivery", "ticket_id": "P0-3"}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        cleared = subprocess.run(
+            [
+                sys.executable,
+                str(BOOT),
+                str(root),
+                "--intent",
+                "登录状态修复",
+                "--skip-budget",
+            ],
+            text=True,
+            capture_output=True,
+        )
+        assert "查无回执 0" in cleared.stdout, cleared.stdout
+        assert "有回执 1" in cleared.stdout, cleared.stdout
+        assert "已进待验收却查无交付回执" not in cleared.stdout, cleared.stdout
+        assert "P0-3：未运行 flow-deliver.py" not in cleared.stdout, cleared.stdout
 
         # plan.md 归档区堆积超过阈值时，必须在回收建议里暴露，避免静默膨胀。
         (flow / "plan.md").write_text(
@@ -460,6 +490,27 @@ def main() -> None:
         assert outside.returncode == 1, outside
         assert "未接管" in outside.stdout, outside.stdout
         assert "不属于任何已接入项目" in outside.stdout, outside.stdout
+
+        # 没有可识别编号的待验收条目不能被当成“有回执”蒙混过关。
+        (flow / "plan.md").write_text(
+            "\n".join(
+                [
+                    "# Plan",
+                    "## 当前聚焦待办 (P0)",
+                    "- [ ] P0-1 [登录状态修复] 修正登录失效",
+                    "## ⏳ 待人工验收",
+                    "- [-] T05 无编号历史条目",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        unknown_id = subprocess.run(
+            [sys.executable, str(BOOT), str(root), "--intent", "登录状态修复", "--skip-budget"],
+            text=True,
+            capture_output=True,
+        )
+        assert "编号无法识别 1" in unknown_id.stdout, unknown_id.stdout
+        assert "无编号条目（无法核对回执）" in unknown_id.stdout, unknown_id.stdout
     print("PASS: flow-boot routes active focus, task cards, nested cards and intent")
 
 

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "flow-deliver.py"
@@ -144,6 +147,53 @@ def main() -> None:
         missing_board = module.render_plan_sections(Path(tmp) / "nope" / "plan.md")
         assert "## 🎯 当前聚焦待办 (P0)" in missing_board, missing_board
         assert "## 💡 本轮决策记录 (Decisions)" in missing_board, missing_board
+
+        # 收工必须落盘：stdout 只活在工具结果里，模型漏贴就彻底丢失。
+        # 实测 2026-09-22 的 o2o 会话跑了 7 次 flow-deliver.py，回复里 0 次看板。
+        run_root = Path(tmp) / "deliver-run"
+        (run_root / "flow" / "tasks").mkdir(parents=True)
+        (run_root / "flow" / "plan.md").write_text(
+            "## 🎯 当前聚焦待办 (P0)\n- [ ] T-9 后续任务\n", encoding="utf-8"
+        )
+        run_card = run_root / "flow" / "tasks" / "T-9.md"
+        run_card.write_text(
+            "\n".join(
+                [
+                    "ticket_id: T-9",
+                    "objective: 落盘回执",
+                    "mode: execute",
+                    "method: TDD",
+                    "write_whitelist: src/auth.ts",
+                    "verify_command: npm test -- auth",
+                    "acceptance: Given 有效账号，When 登录，Then 返回有效令牌",
+                    "evidence: tests/auth.test.ts Exit 0",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                str(run_card),
+                "--changed",
+                "src/auth.ts",
+                "--evidence",
+                "npm test -- auth Exit 0",
+            ],
+            text=True,
+            capture_output=True,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert ">>> 以上三段必须原样粘贴到回复" in proc.stdout, proc.stdout
+        receipts = sorted((run_root / "flow" / "deliveries").glob("*.json"))
+        assert len(receipts) == 1, receipts
+        receipt = json.loads(receipts[0].read_text(encoding="utf-8"))
+        assert receipt["operation"] == "delivery", receipt
+        assert receipt["ticket_id"] == "T-9", receipt
+        board_copy = run_root / "flow" / module.BOARD_FILE
+        assert board_copy.is_file(), board_copy
+        assert "任务状态看板" in board_copy.read_text(encoding="utf-8")
 
     print("PASS: flow-deliver emits a complete acceptance card")
 

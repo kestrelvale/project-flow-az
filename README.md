@@ -134,8 +134,13 @@ python3 ~/.codex/skills/project-flow-az/scripts/flow-boot.py . --intent "<本轮
 ## 🧾 只读状态计数
 - 待验收：N
 ## ⚠️ 待人工决策
+## 📨 交付回执
+- 待验收 N 项：有回执 a / 查无回执 b / 编号无法识别 c
 ## ♻️ 回收建议
 ```
+
+`## 📨 交付回执` 由 `flow-boot.py` 核对 `flow/deliveries/` 得出：每个 `[-]` 待验收任务
+必须能查到由 `flow-deliver.py` 落盘的回执，否则说明上一轮根本没走收工流程，会被点名要求补交。
 
 如果当前目录不属于任何已接入项目，入口会明确输出“未接管”并返回非零。
 
@@ -299,7 +304,7 @@ skill 会在 `flow/进展.md` 顶部追加一条记录，字段包括：
 | `scripts/flow-gc.py` | Verification GC 与日志滚动：验证垃圾进入 `trash/verification/`，过长进展进入 `history/progress/` |
 | `scripts/flow-gate.py` | Plan / Execute / Review / Handoff 任务卡阶段门禁 |
 | `scripts/flow-budget.py` | 读取真实会话 token、缓存、轮次和工具调用，输出 WARN/STOP 与接力提示词 |
-| `scripts/flow-deliver.py` | 生成完整四状态看板、六字段工作汇报与交付验收卡 |
+| `scripts/flow-deliver.py` | 生成完整四状态看板、六字段工作汇报与交付验收卡，并落盘 `flow/deliveries/` 回执与 `flow/看板.md` 副本 |
 | `assets/templates/` | 注入项目的模板文件 |
 | `assets/templates/MODULE_AGENTS.md` | 子项目局部规则入口模板 |
 | `evals/evals.json` | 单仓、多独立仓库、非破坏接入与运行时合同行为用例 |
