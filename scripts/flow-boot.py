@@ -336,7 +336,26 @@ def handoff_is_acceptable(flow: Path, thread_id: str = "") -> bool:
     return result.returncode == 0
 
 
-def read_pending_stop(flow: Path, thread_id: str = "") -> tuple[Path | None, dict[str, object]]:
+def latest_receipt_path(flow: Path) -> Path | None:
+    """取开工前的最近一条熔断回执。
+
+    开工这次 flow-budget 还会再写一条回执，其 handoff_head 捕获的是「此刻的顶部标题」，
+    拿它当参照去比「顶部标题有没有变」必然相等 —— 柔性阻塞于是永远核销不掉。
+    所以参照必须是开工之前的那一条。
+
+    实现：默认**排除文件里最新那条**（它就是本次开工刚写的那条），取倒数第二条；
+    目录里只有一条时无法再往前找，回退到该条（此时它只可能是上一轮的熔断回执）。
+    """
+    receipt_dir = flow / BUDGET_DIR
+    if not receipt_dir.is_dir():
+        return None
+    receipts = sorted(receipt_dir.glob("*-stop.json"))
+    if not receipts:
+        return None
+    return receipts[0] if len(receipts) == 1 else receipts[-2]
+
+
+def read_pending_stop(flow: Path, thread_id: str = "", receipt_path: Path | None = None) -> tuple[Path | None, dict[str, object]]:
     """最近一次预算 STOP 是否还没被交接棒消化。
 
     实测 2026-09-21 的 8 个 zhengjie 分端会话：flow-budget.py 每次都判出 STOP
@@ -348,28 +367,37 @@ def read_pending_stop(flow: Path, thread_id: str = "") -> tuple[Path | None, dic
     receipt_dir = flow / BUDGET_DIR
     if not receipt_dir.is_dir():
         return None, {}
-    receipts = sorted(receipt_dir.glob("*-stop.json"))
-    if not receipts:
-        return None, {}
-    latest = receipts[-1]
+    if receipt_path is not None:
+        latest = receipt_path
+    else:
+        receipts = sorted(receipt_dir.glob("*-stop.json"))
+        if not receipts:
+            return None, {}
+        latest = receipts[-1]
     try:
         data = json.loads(latest.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None, {}
-    # 交接棒是否补上：标题与熔断当时不同 **且** 通过蒸馏/字段校验才算已交接。
-    # 只看标题会被一句占位标题绕过（见 handoff_is_acceptable 注释）。
+    # 交接棒是否补上：标题与熔断当时不同 **且** 通过蒸馏/字段校验 **且** 来源会话对得上。
+    # 只看标题会被一句占位标题绕过（见 handoff_is_acceptable 注释）；
+    # 只看新标题又会让并发会话的交接棒替别人核销熔断（2026-09-23 实测踩到）。
     title, _ = latest_handoff(flow)
+    owner = str(data.get("thread_id") or "").lower()
+    declared = handoff_thread_id(flow)
     if (
         title
         and title != str(data.get("handoff_head", ""))
         and handoff_is_acceptable(flow, thread_id)
+        and (not owner or declared == owner)
     ):
         return None, data
     return latest, data
 
 
-def render_stop_reports(flow: Path, thread_id: str = "") -> list[str]:
-    receipt, data = read_pending_stop(flow, thread_id)
+def render_stop_reports(
+    flow: Path, thread_id: str = "", receipt_path: Path | None = None
+) -> list[str]:
+    receipt, data = read_pending_stop(flow, thread_id, receipt_path)
     if receipt is None:
         return []
     reasons = "；".join(str(reason) for reason in data.get("reasons", [])[:3])
@@ -390,6 +418,15 @@ def render_stop_reports(flow: Path, thread_id: str = "") -> list[str]:
     if stored:
         reports.append("  - 接力提示词（可直接复制给新会话）：")
         reports.extend(f"    {line}" for line in stored.splitlines())
+    # 为什么还没核销：把「谁该核销、当前声明的是谁」摊开，避免干等。
+    owner = str(data.get("thread_id") or "")
+    declared = handoff_thread_id(flow)
+    if owner and declared != owner:
+        reports.append(
+            f"  - 未核销原因：本次熔断属于会话 `{owner[:12]}`，"
+            f"而当前交接棒声明的是 `{(declared or '未声明')[:12]}`。"
+            f"只有当事会话写的交接棒（带 `thread={owner}`）才能核销这条熔断。"
+        )
     return reports
 
 
@@ -453,7 +490,27 @@ MAX_SCOPE_ITEMS = 8
 # 交接棒结构化四字段：缺一项，下一个会话就得重读 plan + 任务卡 + 进展才能拼状态，
 # 这部分重复劳动实测会吃掉大量预算。字段名保持简短以降低书写成本。
 HANDOFF_FIELDS = ("现状", "还剩", "卡在哪", "下一步")
-MAX_HANDOFF_BYTES = 1200
+# 上限按实测重标（2026-09-23 取样 zhengjie-hrm 229 条真实交接棒）：
+#   p25 1151 / p50 1543 / p75 1979 / p90 2646 / max 5965，**72% 超过旧的 1200**。
+# 1200 是「只写现状/还剩/卡在哪/下一步」时代的遗留值；v4.15.0 之后交接棒还要带
+# SDD 蒸馏结构（规格点 SPE-n / 待办 / 证据 / 下一步），旧值必然误伤合格交接棒
+# （实测有一条 1532 字节的合格交接棒被拦下）。防「复述背景」已由更精准的照抄检测承担
+# （flow-distill：最长连续照抄 >= 400 字符或比例 >= 60%），所以这里只做体积兜底，
+# 取 4000（> p97），仍能挡住 6KB 级别的整段复述。
+MAX_HANDOFF_BYTES = 4000
+# 交接棒必须声明来源 Codex 线程 id（`thread=<uuid>`），且只有当事会话能核销自己的熔断。
+# 依据：2026-09-23 实测「我的交接棒被并发会话顶掉，导致上一轮 STOP 未交接」——
+# 并发会话各写各的交接棒，谁都能把别人的熔断当已交接。
+HANDOFF_THREAD_RE = re.compile(
+    r"thread=([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+)
+
+
+def handoff_thread_id(flow: Path) -> str:
+    """取交接棒声明的来源 Codex 线程 id（标题优先，正文兜底）。"""
+    title, body = latest_handoff(flow)
+    match = HANDOFF_THREAD_RE.search(title) or HANDOFF_THREAD_RE.search(body)
+    return match.group(1).lower() if match else ""
 # 中段复查节奏，与 flow-budget.py 的 --guard 输出保持一致。
 GUARD_FILE = "guard.json"
 GUARD_STALE_CALLS = 50
@@ -529,6 +586,12 @@ def check_handoff_schema(flow: Path, stopped: bool) -> list[str]:
         problems.append(
             f"交接棒缺少字段：{'、'.join(missing)}；"
             f"必须补全「现状 / 还剩 / 卡在哪 / 下一步」，否则新会话需重读全部文件。"
+        )
+    if not HANDOFF_THREAD_RE.search(title) and not HANDOFF_THREAD_RE.search(body):
+        problems.append(
+            "交接棒未声明来源 Codex 线程 id：标题或正文必须带 `thread=<当前会话 thread id>`。"
+            "没有它，就无法区分「当事会话的交接」与「并发会话顺手写的交接」，"
+            "熔断不会被核销（实测 2026-09-23 踩到：交接棒被并发会话顶掉）。"
         )
     if len(body.encode("utf-8")) > MAX_HANDOFF_BYTES:
         problems.append(
@@ -1201,7 +1264,11 @@ def main() -> int:
             capture_output=True,
         )
     budget_output = (budget_result.stdout or "") if budget_result else ""
-    stop_reports = render_stop_reports(flow_dir, thread_id)
+    # 核销参照必须是「开工前那条」：本次 flow-budget 刚写的回执 handoff_head
+    # 捕获的是此刻的顶部标题，拿它当参照必然相等 → 柔性阻塞永远核销不掉。
+    # 所以这里在预算跑完之后取，由 latest_receipt_path 排除刚写的这条。
+    pending_receipt = latest_receipt_path(flow_dir)
+    stop_reports = render_stop_reports(flow_dir, thread_id, pending_receipt)
     guard_problem = read_guard_staleness(flow_dir, budget_output)
     soft_blocked = bool(stop_reports) or bool(guard_problem)
     distill_problems, distill_notes = run_distill_checks(project_root, thread_id)

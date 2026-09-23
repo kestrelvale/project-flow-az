@@ -22,7 +22,7 @@ def boot(root: Path) -> subprocess.CompletedProcess[str]:
             "登录状态修复",
             "--skip-budget",
             "--thread-id",
-            "test-thread-soft-block",
+            "01a0c6f8-324a-7112-82de-d0f97e2f21d4",
         ],
         text=True,
         capture_output=True,
@@ -82,6 +82,7 @@ def main() -> None:
                     "tool_calls": 160,
                     "reasons": ["上下文占用 31.6%"],
                     "handoff_head": "## 2026-09-22 · 旧交接棒 · T1",
+                    "thread_id": "01a0c6f8-324a-7112-82de-d0f97e2f21d4",
                 },
                 ensure_ascii=False,
             ),
@@ -109,8 +110,66 @@ def main() -> None:
         (flow / "进展.md").write_text(
             "\n".join(
                 [
-                    "## 2026-09-23 · T1 · 交接棒（SDD 蒸馏）",
+                    "## 2026-09-23 · T1 · 交接棒（SDD 蒸馏） · thread=01a0c6f8-324a-7112-82de-d0f97e2f21d4",
                     "- 规格点 SPE-1 | 登录四态补齐 | 证据：pytest exit 0",
+                    "- 还剩：SPE-2",
+                    "- 卡在哪：无",
+                    "- 下一步：开新会话按未回收规格点继续",
+                    "",
+                    "## 2026-09-22 · 旧交接棒 · T1",
+                    "- 现状: 旧",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+
+        # 反向：来源会话对不上的交接棒**不得**核销（实测踩过：并发会话顶掉别人的交接棒）
+        (flow / "进展.md").write_text(
+            "\n".join(
+                [
+                    "## 2026-09-23 · T1 · 别人的交接棒 · thread=deadbeef-0000-4000-8000-000000000000",
+                    "- 规格点 SPE-1 | x | 证据：y",
+                    "- 现状：别人写的",
+                    "- 还剩：无",
+                    "- 卡在哪：无",
+                    "- 下一步：无",
+                    "",
+                    '## 2026-09-22 · 旧交接棒 · T1',
+                    "- 现状: 旧",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        # 先把回执恢复成未核销状态
+        import json as _json
+        (receipts / "20260923-130000-stop.json").write_text(
+            _json.dumps(
+                {
+                    "operation": "budget_stop",
+                    "input_tokens": 300_000,
+                    "rounds": 23,
+                    "tool_calls": 160,
+                    "reasons": ["上下文占用 31.6%"],
+                    "handoff_head": "## 2026-09-22 · 旧交接棒 · T1",
+                    "thread_id": "01a0c6f8-324a-7112-82de-d0f97e2f21d4",
+                    "thread_id": "01a0c6f8-324a-7112-82de-d0f97e2f21d4",
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        foreign = boot(root)
+        assert "【柔性阻塞】" in foreign.stdout, foreign.stdout
+        assert "未核销原因" in foreign.stdout, foreign.stdout
+        assert "只有当事会话写的交接棒" in foreign.stdout, foreign.stdout
+        # 补上「当事会话」写的交接棒（带 thread=<uid>）→ 熔断回执被核销，阻塞自动解除。
+        (flow / "进展.md").write_text(
+            "\n".join(
+                [
+                    "## 2026-09-23 · T1 · 交接棒（SDD 蒸馏） · thread=01a0c6f8-324a-7112-82de-d0f97e2f21d4",
+                    "- 规格点 SPE-1 | 登录四态补齐 | 证据：pytest exit 0",
+                    "- 现状：已交接",
                     "- 还剩：SPE-2",
                     "- 卡在哪：无",
                     "- 下一步：开新会话按未回收规格点继续",
