@@ -5,13 +5,16 @@
 
 ## 🎯 当前聚焦待办 (P0)
 
-- [ ] PFP-ORPHAN-RECEIPT-20260923 [P1] 孤儿回执作废：所属会话已消失的熔断回执会永久阻塞项目，
-  需提供显式作废命令（`flow-boot.py --void-stale-receipt`），带留痕与二次确认。
+- 无（PFP-ORPHAN-RECEIPT-20260923 已交付，等人工验收后归档）
 
 ## ⏳ 待人工验收 (Pending Verification)
 
+- [-] PFP-ORPHAN-RECEIPT-20260923 [P1] 等人工验收：孤儿熔断回执可显式作废，
+  `flow-boot.py --void-stale-receipt` 列候选 + `--confirm` 显式作废 + `flow/gc/receipts/` 留痕，
+  无参不改行为（v4.15.14，`tests/run-all.sh` 17 项 Exit 0）。
 - [-] PFP-RELEASE-20260923 [P0] v4.15.0 → v4.15.13 十四个版本已推送远端，等人工验收：
   交接棒被顶掉仍可核销、核销参照不退回孤儿回执、规格点台账硬门禁、外部心跳、提示词可取回。
+  （v4.15.14 已接续推送，远端 HEAD 不再是 b19f005 —— 见 PFP-ORPHAN-RECEIPT-20260923）
 
 ## 📦 已完结归档 (Archived in flow/history/)
 

@@ -1,3 +1,34 @@
+## [4.15.14] - 2026-09-24 (孤儿熔断回执可显式作废：列候选 / 留痕 / 无参不改行为)
+
+遗留缺口（`PFP-ORPHAN-RECEIPT-20260923`）：v4.15.13 让参照回执不再退回更旧的一条，
+把「永久 fail-closed」缩成了「**一条孤儿回执顶住此后每个新会话**」——
+owner 会话已消失的 `flow/budget/*-stop.json` 永远等不到当事会话来核销，
+其后每轮开工都吃「上一轮预算 STOP 未交接」柔性阻塞，且没有任何出口。
+
+### Added（`flow-boot.py --void-stale-receipt`）
+- **列候选**：`flow-boot.py . --void-stale-receipt` 列出 owner 会话在 `~/.codex/sessions`
+  里已无 rollout 的熔断回执（`orphan_receipts()` 判据只有一条：会话没了）；
+  `--sessions-root` 可指向别处，便于夹具。
+- **显式作废**：必须再点名 `--confirm <回执文件名>` 才动手，二次确认不是可选装饰——
+  错误作废会静默放行真债务，所以本命令**永不自动作废**；没带 `--confirm` 时只列不改，
+  开工行为与旧版完全一致。
+- **留痕**：作废把原回执内容整块写进 `flow/gc/receipts/<时间>-void-<原文件名>.json`
+  （`operation=receipt_void` / `thread_id` / `voided_receipt` / `sessions_root` / `original`），
+  再删原回执；与 `flow-gc.py` 的 `flow/gc/receipts/` 目录约定一致，可审计可回滚。
+- 拒绝路径：活会话的回执、不存在的名字都返回非零，不改任何文件。
+
+### Verification
+- `tests/run-all.sh` 全量 **17 项 Exit 0**（新增 `test-orphan-receipt.py`，先红后绿：
+  未实现时 argparse 直接拒绝 `--void-stale-receipt`）。
+- `test-orphan-receipt.py` 覆盖三条规格点：SPE-1 列候选（活会话回执不得入列）、
+  SPE-2 作废后开工不再阻塞且留痕保留原 `handoff_head`、SPE-3 负向（只列 / 点名不存在 /
+  点名活会话回执三种情况都不动盘）。
+- 真机复验（本仓库自身）：`flow-boot.py . --void-stale-receipt` → 候选 0 条
+  （现存的 `20260924-003602-stop.json` owner `01a0cd2e` 仍有 rollout，不应被作废）。
+
+### Packaging
+- `VERSION` → `4.15.14`；项目侧 `flow/规范/VERSION` 由热同步接管，无需手工同步。
+
 ## [4.15.13] - 2026-09-23 (孤儿回执永久阻塞：参照回执不得退回更旧的一条)
 
 事故现场：`zhengjie-hrm` 连续两代会话（`01a0ce3d` / `01a0ceec`）**写完合规交接棒后仍被柔性阻塞**，

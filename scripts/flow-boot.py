@@ -56,6 +56,7 @@ CLAIM_TTL_HOURS = 12
 # 交付回执目录：由 flow-deliver.py 写入，是“这一轮真的收过工”的唯一机器凭证。
 DELIVERIES_DIR = "deliveries"
 BUDGET_DIR = "budget"
+DEFAULT_SESSIONS_ROOT = Path.home() / ".codex" / "sessions"
 # 同时兼容 P0-3、P-FRONT-3、P0-26 这类编号，别只认字母开头的旧写法。
 TICKET_IN_TITLE_RE = re.compile(r"([A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*-\d+)")
 
@@ -380,6 +381,90 @@ def latest_receipt_path(flow: Path, thread_id: str = "") -> Path | None:
             if str(data.get("thread_id") or "") == thread_id:
                 return path
     return candidates[-1]
+
+
+def session_exists(thread_id: str, sessions_root: Path) -> bool:
+    """该 thread 在 sessions 里是否还有 rollout 文件（= 会话是否还活着）。"""
+    if not thread_id:
+        return False
+    return next(sessions_root.rglob(f"*{thread_id}*.jsonl"), None) is not None
+
+
+def orphan_receipts(flow: Path, sessions_root: Path) -> list[tuple[Path, str]]:
+    """候选孤儿熔断回执：owner 会话在 sessions 里已无 rollout。
+
+    只判「会话没了」，不判「它该不该交接」——判错了会静默放行真债务，
+    所以作废仍必须由人显式点名（见 void_stale_receipt）。
+    """
+    found: list[tuple[Path, str]] = []
+    for path in sorted((flow / BUDGET_DIR).glob("*-stop.json")):
+        try:
+            owner = str(json.loads(path.read_text(encoding="utf-8")).get("thread_id") or "")
+        except (OSError, json.JSONDecodeError):
+            continue
+        if owner and not session_exists(owner, sessions_root):
+            found.append((path, owner))
+    return found
+
+
+def void_stale_receipt(project_root: Path, confirm: str, sessions_root: Path) -> int:
+    """列出 / 显式作废孤儿熔断回执。
+
+    死会话留下的回执会让其后每个新会话都吃「上一轮预算 STOP 未交接」柔性阻塞，
+    而当事会话再也不会来核销（2026-09-24 实测：01a0c297 的回执顶住 01a0cd2e）。
+    这里只做「显式点名作废」：无 --confirm 时纯列出、不写盘。
+    """
+    flow = project_root / "flow"
+    candidates = orphan_receipts(flow, sessions_root)
+    if not confirm:
+        print(f"project-flow 孤儿熔断回执 [候选 {len(candidates)}]")
+        for path, owner in candidates:
+            print(f"- {path.relative_to(project_root)} | owner={owner[:12]} | sessions 里无该 thread 的 rollout")
+        if not candidates:
+            print("- 无：所有回执的 owner 会话在 sessions 里仍有 rollout")
+        print("- 作废（二次确认，必须显式点名）："
+              f"flow-boot.py . --void-stale-receipt --confirm <回执文件名>")
+        print("- 未带 --confirm：不改动任何文件，开工行为完全不变")
+        return 0
+
+    target = next((item for item in candidates if item[0].name == confirm), None)
+    if target is None:
+        print(f"project-flow 拒绝作废：{confirm} 不是候选孤儿回执", file=sys.stderr)
+        print("- 只作废 owner 会话已消失、且被 --void-stale-receipt 列出的回执；"
+              "活会话的回执只能由它自己写交接棒核销。", file=sys.stderr)
+        return 1
+    path, owner = target
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    # 留痕：原回执内容 + 作废元信息，写进 flow/gc/receipts/（与 flow-gc 同一目录约定）。
+    ledger_dir = flow / "gc" / "receipts"
+    ledger_dir.mkdir(parents=True, exist_ok=True)
+    ledger = ledger_dir / f"{time.strftime('%Y%m%d-%H%M%S')}-void-{path.name}"
+    ledger.write_text(
+        json.dumps(
+            {
+                "operation": "receipt_void",
+                "voided_receipt": path.name,
+                "voided_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "thread_id": owner,
+                "reason": "owner 会话在 sessions 里已无 rollout（孤儿熔断回执，永不核销）",
+                "sessions_root": str(sessions_root),
+                "original": data,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    path.unlink()
+    print(f"project-flow 孤儿熔断回执 [已作废]: {path.relative_to(project_root)}")
+    print(f"- owner={owner[:12]}（sessions 里已无 rollout）")
+    print(f"- 留痕：{ledger.relative_to(project_root)}")
+    print("- 开工不再因此阻塞；如该会话仍存在请从留痕恢复原回执")
+    return 0
 
 
 def _handoff_blocks(text: str) -> list[tuple[str, str]]:
@@ -1303,6 +1388,17 @@ def main() -> int:
     parser.add_argument("--intent", default="", help="本轮用户任务的简短摘要")
     parser.add_argument("--thread-id", default="", help=argparse.SUPPRESS)
     parser.add_argument("--skip-budget", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--void-stale-receipt",
+        action="store_true",
+        help="列出 owner 会话已消失的孤儿熔断回执（不带 --confirm 时只列不改）",
+    )
+    parser.add_argument(
+        "--confirm",
+        default="",
+        help="配合 --void-stale-receipt：显式点名要作废的回执文件名（二次确认）",
+    )
+    parser.add_argument("--sessions-root", type=Path, default=DEFAULT_SESSIONS_ROOT)
     args = parser.parse_args()
 
     project_root = find_project_root(Path(args.start))
@@ -1311,6 +1407,10 @@ def main() -> int:
         print("- 当前工作目录不属于任何已接入项目。")
         print("- 请切换到项目根目录后重新运行 flow-boot.py。")
         return 1
+
+    # 维护子命令：先于热同步/审计/预算返回，避免为一次作废写新回执、刷审计。
+    if args.void_stale_receipt:
+        return void_stale_receipt(project_root, args.confirm, args.sessions_root)
 
     # thread-id 兜底：AGENTS.md 只要求传 --intent，若不补 CODEX_THREAD_ID，
     # 交接棒核销会因为取不到用户消息比对源而判失败 → 柔性阻塞永远解不开。
