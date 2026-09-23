@@ -336,15 +336,19 @@ def handoff_is_acceptable(flow: Path, thread_id: str = "") -> bool:
     return result.returncode == 0
 
 
-def latest_receipt_path(flow: Path) -> Path | None:
-    """取开工前的最近一条熔断回执。
+def latest_receipt_path(flow: Path, thread_id: str = "") -> Path | None:
+    """取「开工前那条」熔断回执，作为核销参照。
 
-    开工这次 flow-budget 还会再写一条回执，其 handoff_head 捕获的是「此刻的顶部标题」，
-    拿它当参照去比「顶部标题有没有变」必然相等 —— 柔性阻塞于是永远核销不掉。
-    所以参照必须是开工之前的那一条。
+    两条硬约束（都来自实测事故）：
+    1) 不能取本次开工刚写的那条——它的 `handoff_head` 捕获的是此刻的顶部标题，
+       拿它比「标题有没有变」必然相等，柔性阻塞会永远核销不掉；
+    2) **必须优先取属于本会话的回执**。多会话并发写同一个项目时，
+       机械取「倒数第二条」会取到别人的回执；而核销要求来源会话匹配，
+       于是本会话自己写的合法交接棒永远核销不掉 —— 表现为反复 STOP / 反复柔性阻塞
+       （2026-09-23 thread 01a0c24b 实测：回执 head=PMO、顶部已是它自己的 Wave0 交接棒，
+       参照却取到了 thread 01a0c297 的回执）。
 
-    实现：默认**排除文件里最新那条**（它就是本次开工刚写的那条），取倒数第二条；
-    目录里只有一条时无法再往前找，回退到该条（此时它只可能是上一轮的熔断回执）。
+    取法：在「排除最新那条」之后，优先选 thread_id 匹配的回执（若有），否则取最近的。
     """
     receipt_dir = flow / BUDGET_DIR
     if not receipt_dir.is_dir():
@@ -352,7 +356,18 @@ def latest_receipt_path(flow: Path) -> Path | None:
     receipts = sorted(receipt_dir.glob("*-stop.json"))
     if not receipts:
         return None
-    return receipts[0] if len(receipts) == 1 else receipts[-2]
+    if len(receipts) == 1:
+        return receipts[0]
+    candidates = receipts[:-1]  # 排除本次开工刚写的那条
+    if thread_id:
+        for path in reversed(candidates):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if str(data.get("thread_id") or "") == thread_id:
+                return path
+    return candidates[-1]
 
 
 def read_pending_stop(flow: Path, thread_id: str = "", receipt_path: Path | None = None) -> tuple[Path | None, dict[str, object]]:
@@ -1267,7 +1282,7 @@ def main() -> int:
     # 核销参照必须是「开工前那条」：本次 flow-budget 刚写的回执 handoff_head
     # 捕获的是此刻的顶部标题，拿它当参照必然相等 → 柔性阻塞永远核销不掉。
     # 所以这里在预算跑完之后取，由 latest_receipt_path 排除刚写的这条。
-    pending_receipt = latest_receipt_path(flow_dir)
+    pending_receipt = latest_receipt_path(flow_dir, thread_id)
     stop_reports = render_stop_reports(flow_dir, thread_id, pending_receipt)
     guard_problem = read_guard_staleness(flow_dir, budget_output)
     soft_blocked = bool(stop_reports) or bool(guard_problem)

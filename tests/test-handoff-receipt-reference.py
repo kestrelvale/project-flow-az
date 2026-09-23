@@ -104,7 +104,33 @@ def main() -> None:
     pending4, _ = fb.read_pending_stop(flow4, "t", ref4)
     check("顶部标题未变（未写新交接棒）→ 仍报未交接", pending4 is not None, str(pending4))
 
-    for root in (root1, root3, root4):
+    # 用例5（实测事故 2026-09-23 thread 01a0c24b）：多会话并发写同一个项目时，
+    # 参照回执必须**优先取属于本会话**的那条。旧实现机械取「倒数第二条」，
+    # 恰好取到别的会话的回执 → 来源会话不匹配 → 本会话自己写的合法交接棒永远核销不掉，
+    # 表现为「反复 STOP、反复柔性阻塞、走不出去」。
+    uid = "01a0c24b-06d4-7ad0-8253-92d1e8a6b667"
+    other = "01a0c297-b8e5-7561-9014-570c11a5499e"
+    top5 = HANDOFF.replace(NEW, f"{NEW} · thread={uid}")
+    root5, flow5 = build(top5, [OLD, OLD, f"{NEW} · thread={uid}"])
+    for name, tid in (
+        ("20260923-120000-stop.json", uid),      # 本会话（head=旧）
+        ("20260923-120100-stop.json", other),    # 别的会话（head=旧）
+        ("20260923-120200-stop.json", uid),      # 本会话刚写（head=当前顶部）
+    ):
+        path = flow5 / "budget" / name
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["thread_id"] = tid
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    ref5 = fb.latest_receipt_path(flow5, uid)
+    check(
+        "参照优先取本会话回执（而非别人的）",
+        ref5 is not None and ref5.name == "20260923-120000-stop.json",
+        str(ref5),
+    )
+    pending5, _ = fb.read_pending_stop(flow5, uid, ref5)
+    check("本会话合法交接棒 → 核销（不再被别人的回执卡住）", pending5 is None, str(pending5))
+
+    for root in (root1, root3, root4, root5):
         for child in sorted(root.rglob("*"), reverse=True):
             child.unlink() if child.is_file() else child.rmdir()
     print("PASS: 熔断核销以「开工前回执」为参照，且未交接仍被拦住")
