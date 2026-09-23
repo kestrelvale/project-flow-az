@@ -9,21 +9,37 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-# 阈值按实测标定（2026-09-23 取证 8 个分端会话 rollout，窗口 950k）：
-#   - 首个「用户消息回放块」出现在单次输入 556166 / 574491 / 608167；
-#   - 压缩安装成功样本在 882k，全程最高 996k；
-#   - 工具调用阈值 100 曾在单次输入仅 38% 时误报 STOP（P4 会话），
-#     天天报警却没人执行，等于把熔断降级成噪音。
-# 因此 STOP 压到 28 万（≈29%，距压缩区约一半余量），WARN 18 万；
-# 轮次与工具调用作为同量级兜底维度，只在 token 维度失效时接棒。
-WARN_RATIO = 0.18
-STOP_RATIO = 0.29
-WARN_INPUT_TOKENS = 180_000
-STOP_INPUT_TOKENS = 280_000
+# 阈值按**比例**标定，锚在会话自己声明的有效窗口上（不写死绝对值）。
+#
+# 推导依据（2026-09-23 取证 8 个分端会话 rollout，实测窗口 950000）：
+#   1. 窗口的来源：Codex 用「模型 context_window × effective_context_window_percent」。
+#      会话里 model_context_window 就是有效窗口——中继会话一律 950000（=0.95×1e6），
+#      原生 GPT 是 258400（=0.95×272k）。所以硬编码绝对值对某个模型必然错。
+#   2. 压缩触发点实测 ≈ 104.9% 窗口（一次请求输入 996370 时压缩才安装成功）。
+#   3. 真正先失效的不是压缩，而是模型：deepseek-v4.1-flash 在单次输入 556166 /
+#      574491 / 608167 时连续三次**放弃干活、把历史用户消息原样回放成汇报**，
+#      = 58.5% 窗口。这才是用户看到「汇报带上所有用户消息」的真身。
+#   4. 单轮上下文增量实测 p50 30982 / p90 125246 / max 289972，p90 = 13.2% 窗口。
+#
+# 因此 STOP = （实测失效起点 − 一个 p90 轮）= 58.5% − 13.2% ≈ 45%；
+# WARN 取 STOP 的 0.75 倍 ≈ 34%，留出一轮时间做 SDD 拆卡与交接。
+# 这样 272k 模型（有效 258.4k）STOP≈11.6 万，1M 声明模型 STOP≈42.8 万，
+# 都自动落在各自压缩区之前，且各自留 ≥1 个 p90 轮的余量。
+WARN_RATIO = 0.34
+STOP_RATIO = 0.45
+# 实测的模型失效起点（deepseek-v4.1-flash 在 58.5% 窗口处开始回放用户消息），
+# 只用于提示文案与标定锁，不参与判级——判级线是它减去一个 p90 轮得到的 45%。
+MODEL_FAILURE_RATIO = 0.585
+# 窗口读不到时（session 缺 model_context_window）才用绝对值兜底：
+# 取实测失效起点 556166 减一个 p90 轮 125246 ≈ 43 万。
+WARN_INPUT_TOKENS = 320_000
+STOP_INPUT_TOKENS = 430_000
+# 轮次与工具调用是漂移兜底：只在高轮次/高调用量但 token 还没顶到线时接棒，
+# 阈值放在 token 线之后，避免再次出现「38% 就报 STOP」的告警疲劳。
 WARN_ROUNDS = 15
-STOP_ROUNDS = 22
+STOP_ROUNDS = 25
 WARN_TOOL_CALLS = 90
-STOP_TOOL_CALLS = 150
+STOP_TOOL_CALLS = 160
 
 # 熔断回执目录：STOP 必须落盘，否则交接棒全靠模型自觉。
 # 实测 2026-09-21 的 8 个 zhengjie 分端会话：flow-budget 每次都判出 STOP
@@ -166,8 +182,13 @@ def summarize(path: Path) -> dict:
     cache_ratio = cached / input_tokens if input_tokens else 0.0
     level = "OK"
     reasons: list[str] = []
-    context_stop = ratio >= STOP_RATIO or input_tokens >= STOP_INPUT_TOKENS
-    context_warn = ratio >= WARN_RATIO or input_tokens >= WARN_INPUT_TOKENS
+    # 有窗口就按比例（锚在会话自己声明的有效窗口上）；读不到窗口才退回绝对值。
+    if context_window:
+        context_stop = ratio >= STOP_RATIO
+        context_warn = ratio >= WARN_RATIO
+    else:
+        context_stop = input_tokens >= STOP_INPUT_TOKENS
+        context_warn = input_tokens >= WARN_INPUT_TOKENS
     volume_stop = len(rounds) >= STOP_ROUNDS or tool_calls >= STOP_TOOL_CALLS
     volume_warn = len(rounds) >= WARN_ROUNDS or tool_calls >= WARN_TOOL_CALLS
     if context_stop or volume_stop:
@@ -178,12 +199,14 @@ def summarize(path: Path) -> dict:
         reasons.append(f"单次输入 {input_tokens} 已超过记录的上下文窗口 {context_window}")
     if context_stop:
         reasons.append(
-            f"上下文占用 {ratio:.1%} / 单次输入 {input_tokens} "
-            f"（熔断线 {STOP_INPUT_TOKENS} 或 {STOP_RATIO:.0%}；压缩区实测起于 556k）"
+            f"上下文占用 {ratio:.1%} / 单次输入 {input_tokens}（熔断线 {STOP_RATIO:.0%}"
+            + (f" = {int(context_window * STOP_RATIO):,}" if context_window else f" / {STOP_INPUT_TOKENS:,}")
+            + f"；实测模型在 {MODEL_FAILURE_RATIO:.1%} 窗口处开始回放用户消息）"
         )
     elif context_warn:
         reasons.append(
-            f"上下文占用 {ratio:.1%} / 单次输入 {input_tokens}（接近熔断线，先做 SDD 拆卡）"
+            f"上下文占用 {ratio:.1%} / 单次输入 {input_tokens}"
+            + (f"（预警线 {WARN_RATIO:.0%}；先按 SDD 拆卡，再交接）" if context_window else "（接近熔断线，先做 SDD 拆卡）")
         )
     if len(rounds) >= STOP_ROUNDS:
         reasons.append(f"轮次 {len(rounds)} >= {STOP_ROUNDS}")

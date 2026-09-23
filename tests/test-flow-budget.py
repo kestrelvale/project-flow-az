@@ -71,11 +71,11 @@ def main() -> None:
         normal = root / "normal.jsonl"
         warning = root / "warning.jsonl"
         stopped = root / "stopped.jsonl"
-        # 窗口按真实值 950k；阈值按实测标定：首个「用户消息回放块」出现在
-        # 单次输入 556166（P4 会话），所以 STOP 必须明显早于压缩区。
+        # 窗口按实测真值 950k（中继会话统一声明 0.95×1e6）。阈值按比例标定：
+        # 实测模型在 58.5% 窗口处开始回放用户消息，STOP = 58.5% − 一个 p90 轮 ≈ 45%。
         write_session(normal, 40_000, 30_000, 950_000, 3)
-        write_session(warning, 190_000, 40_000, 950_000, 12)
-        write_session(stopped, 300_000, 0, 950_000, 23)
+        write_session(warning, 350_000, 40_000, 950_000, 12)
+        write_session(stopped, 440_000, 0, 950_000, 23)
 
         normal_report = module.summarize(normal)
         warning_report = module.summarize(warning)
@@ -92,11 +92,14 @@ def main() -> None:
         assert "SPE-1" in prompt and "规格点" in prompt, prompt
         assert "禁止" in prompt and "原样" in prompt, prompt
 
-        # 标定锁：STOP 必须早于实测压缩区（556166），否则熔断永远晚于压缩。
-        compaction_zone = 556_166
-        assert module.STOP_INPUT_TOKENS < compaction_zone, module.STOP_INPUT_TOKENS
-        assert module.WARN_INPUT_TOKENS < module.STOP_INPUT_TOKENS, module.WARN_INPUT_TOKENS
-        assert module.STOP_RATIO * 950_000 < compaction_zone, module.STOP_RATIO
+        # 标定锁（防止阈值再被拍回绝对值）：三条推导约束必须同时成立。
+        model_failure = 556_166          # 实测：模型开始回放用户消息的单次输入
+        per_turn_p90 = 125_246           # 实测：单轮上下文增量 p90
+        assert module.STOP_RATIO < module.MODEL_FAILURE_RATIO, module.STOP_RATIO
+        assert module.WARN_RATIO < module.STOP_RATIO, module.WARN_RATIO
+        assert module.STOP_RATIO * 950_000 < model_failure, module.STOP_RATIO
+        # 272k 模型（有效窗口 258400）必须仍留出 ≥ 1 个 p90 轮的余量。
+        assert (1 - module.STOP_RATIO) * 258_400 >= per_turn_p90, module.STOP_RATIO
 
         # STOP 必须落盘回执：否则下一轮开工判定不了“熔断到底交接了没有”。
         project = root / "proj"
