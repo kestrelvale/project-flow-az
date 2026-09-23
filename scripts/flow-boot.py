@@ -448,6 +448,40 @@ MAX_SCOPE_ITEMS = 8
 # 这部分重复劳动实测会吃掉大量预算。字段名保持简短以降低书写成本。
 HANDOFF_FIELDS = ("现状", "还剩", "卡在哪", "下一步")
 MAX_HANDOFF_BYTES = 1200
+# 中段复查节奏，与 flow-budget.py 的 --guard 输出保持一致。
+GUARD_FILE = "guard.json"
+GUARD_STALE_CALLS = 50
+
+
+def read_guard_staleness(flow: Path, budget_output: str) -> str:
+    """中段复查是否过期。返回空串=不过期；否则返回可直接打印的阻塞说明。
+
+    依据：实测 P4 会话在**同一个 turn 内**跑了 200+ 次工具调用，开工那一次预算判定
+    早就过期（当时只有 38%），一路堆到单次输入 60.8 万才被模型自己「摆烂」暴露。
+    AGENTS.md 明令不装 Hook，所以唯一可强制的时点是「下一个可观测入口」——这里。
+    """
+    checkpoint = flow / BUDGET_DIR / GUARD_FILE
+    current = 0
+    for line in budget_output.splitlines():
+        match = re.search(r"工具调用 (\d+)", line)
+        if match:
+            current = int(match.group(1))
+            break
+    if not current or not checkpoint.is_file():
+        return ""
+    try:
+        data = json.loads(checkpoint.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    last = int(data.get("tool_calls") or 0)
+    if current - last < GUARD_STALE_CALLS:
+        return ""
+    return (
+        f"中段复查已过期：上次检查点在 {last} 次工具调用，现在 {current} 次"
+        f"（间隔 {current - last} ≥ {GUARD_STALE_CALLS}）。先跑 "
+        "`python3 ~/.codex/skills/project-flow-az/scripts/flow-budget.py --guard --project .`，"
+        "超线就立即交接再开新会话。"
+    )
 
 
 def latest_handoff(flow: Path) -> tuple[str, str]:
@@ -968,12 +1002,14 @@ def render_start_status(
         status.append("- 无待验收任务，无需交付回执")
 
     status.extend(["", "## ⏸ 熔断交接"])
+    if soft_blocked:
+        # 阻塞来源有两类：未核销的熔断回执，或中段复查过期。
+        # 提示不能写在 if stop_reports 里面，否则「只有复查过期」时线号是空的。
+        status.append(
+            "- 【柔性阻塞】本轮路由已降级为 handoff-only：只允许写交接棒与规格点台账；"
+            "禁止登记新意图、禁止业务施工（进程不失败，解除条件是交接落盘）。"
+        )
     if stop_reports:
-        if soft_blocked:
-            status.append(
-                "- 【柔性阻塞】本轮路由已降级为 handoff-only：只允许写交接棒与规格点台账；"
-                "禁止登记新意图、禁止业务施工（进程不失败，解除条件是交接落盘）。"
-            )
         status.extend(f"- {report}" for report in stop_reports)
     else:
         status.append("- 无未交接的预算熔断")
@@ -1141,13 +1177,34 @@ def main() -> int:
     dependency_blockers = find_dependency_blockers(cards, active_tasks, project_root / "flow")
     oversized_cards = find_oversized_cards(cards, active_tasks)
     flow_dir = project_root / "flow"
+    # 预算先跑一次并留下来：既用于中段复查的过期判定，也在末尾原样打印，
+    # 避免为了拿工具调用数再解析一遍 rollout。
+    budget_result = None
+    if not args.skip_budget:
+        budget_result = subprocess.run(
+            [
+                sys.executable,
+                str(BUDGET_SCRIPT),
+                "--intent",
+                args.intent or "继续当前 project-flow 活跃任务",
+                *(["--thread-id", thread_id] if thread_id else []),
+                "--project",
+                str(project_root),
+            ],
+            text=True,
+            capture_output=True,
+        )
+    budget_output = (budget_result.stdout or "") if budget_result else ""
     stop_reports = render_stop_reports(flow_dir, thread_id)
-    soft_blocked = bool(stop_reports)
+    guard_problem = read_guard_staleness(flow_dir, budget_output)
+    soft_blocked = bool(stop_reports) or bool(guard_problem)
     distill_problems, distill_notes = run_distill_checks(project_root, thread_id)
     handoff_problems = check_handoff_schema(
         flow_dir, progress_has_stop(flow_dir) or bool(stop_reports)
     )
     handoff_problems.extend(distill_problems)
+    if guard_problem:
+        handoff_problems.append(guard_problem)
     delivery_reports = audit_deliveries(project_root / "flow", pending_tasks)
     claim_reports = (
         []
@@ -1216,21 +1273,9 @@ def main() -> int:
         "超线立即交接，不要等到下一轮开工才发现。"
     )
     print("- 阈值是「占有效窗口的比例」，随模型自适应；具体数字见下方预算输出。")
-    budget_code = 0
-    if not args.skip_budget:
-        budget = subprocess.run(
-            [
-                sys.executable,
-                str(BUDGET_SCRIPT),
-                "--intent",
-                args.intent or "继续当前 project-flow 活跃任务",
-                *(["--thread-id", args.thread_id] if args.thread_id else []),
-                "--project",
-                str(project_root),
-            ],
-            text=True,
-        )
-        budget_code = budget.returncode
+    if budget_output:
+        sys.stdout.write(budget_output)
+    budget_code = budget_result.returncode if budget_result else 0
     return max(audit.returncode, gc.returncode, gate_code, budget_code)
 
 

@@ -1,3 +1,39 @@
+## [4.15.3] - 2026-09-23 (规格点台账成为进出 review 的硬门禁 + 中段复查强制化)
+
+### Added
+- **规格点台账硬门禁**：`flow-gate.py` 在 `review` / `handoff` 阶段强制校验
+  `flow/specs/<ticket>.md`——台账缺失、格式不符、**有空编号**、**`[x]` 无证据（假销账）**、
+  仍有未回收项，一律拦下。确实无规格点的琐碎卡必须显式写 `spec_ledger: none`（留痕豁免，
+  不是静默放行）。依据：P0/P4 会话中断后同一个需求点被反复执行，根因就是没有销账台账。
+- **台账可用自定义路径**：`spec_ledger:` 写相对项目根的路径即按该路径校验（默认
+  `flow/specs/<ticket>.md`），且必须落在项目内。
+- **出厂台账模板** `assets/templates/flow/specs/TEMPLATE.md`：把行格式、状态语义、
+  硬规则与「不许原样照抄用户原话」写进新项目。
+- **任务卡模板**新增 `spec_ledger:` 字段与 Plan 阶段的规格点产出项。
+
+### Changed
+- **中段复查从「可被调用」升级为「可被强制」**：`flow-budget.py --guard` 现在写一份
+  **覆盖式**检查点 `flow/budget/guard.json`（记录当时的工具调用数）；`flow-boot.py` 在开工时
+  比对「距上次检查点是否已过 50 次工具调用」，过期即纳入**柔性阻塞**（路由降级 handoff-only）。
+  依据：P4 在**同一个 turn 内**跑了 200+ 次工具调用，开工那一次判定（当时仅 38%）早已过期。
+- 柔性阻塞提示不再写在 `if stop_reports` 分支内——否则「只有复查过期」时线号是空的。
+- 预算子进程改为只跑一次（先捕获、末尾原样打印），用它同时服务复查过期判定与输出，
+  不再为拿工具调用数重复解析 rollout。
+
+### Boundaries
+- **Hook 仍然不装**（AGENTS.md 明令）。因此中段复查的强制时点是「下一个可观测入口」
+  （开工/门禁/交付），**不是**工具调用之间的实时拦截；真正的中段实时拦截需要 `post_tool_use`
+  hook，属于用户明确排除的范围。
+- **心跳 automation 未能落地**：`automation_update` 在本会话未加载（`unsupported call`），
+  本机也没有任何 automation 存储（`~/.codex/automations` 不存在、`state_5.sqlite` /
+  `thread_history_1.sqlite` / `queue_1.sqlite` 均无相关表），无格式可依、不可臆造。三次途径
+  全部受阻，按熔断止损停止尝试并上报。
+
+### Verification
+- `tests/run-all.sh` 全量 **12 项 Exit 0**（新增 `test-spec-ledger-gate.py`）。
+- 新增负向回归：台账缺失 / 未回收 / 假销账必须拦；全部回收且带证据必须放行；
+  `spec_ledger: none` 必须放行；`--guard` 超线必须非零；检查点过期必须触发柔性阻塞。
+
 ## [4.15.2] - 2026-09-23 (阈值 45%/50% 落地 + 执行逻辑 TDD/ATDD 审查)
 
 ### Changed

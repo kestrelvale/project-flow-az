@@ -30,6 +30,9 @@ PHASE_METHOD = {"plan": "SDD", "execute": "TDD", "review": "ATDD", "handoff": "B
 # 老卡没有 schema 标记，继续走原规则，避免一次性推翻所有在途任务。
 STRICT_SCHEMA = "v2"
 SCOPE_REQUIRED_PARTS = ("输入", "输出", "边界")
+# 规格点台账行格式，与 flow-distill.py 保持一致：
+# `- [状态] SPE-1 | 规格点 | 证据：<…>`
+SPE_LINE = re.compile(r"^\s*[-*]\s*\[([ x\-!])\]\s*(SPE-\d+)\s*\|\s*(.*?)\s*\|\s*证据：\s*(.*)$")
 
 
 def find_project_root(card: Path) -> Path | None:
@@ -126,11 +129,63 @@ def validate_strict(card: Path, values: dict[str, str], phase: str) -> list[str]
         if evidence and not _is_real_path(card, evidence):
             errors.append(f"ATDD 证据文件不存在：{evidence}")
 
+    # 规格点回收：进入 review/handoff 前，台账必须存在且没有未回收项。
+    # 依据：2026-09-21 的 P0/P4 会话中断后，同一个需求点被反复执行——因为没有
+    # 销账台账，「做完了没」只能靠重读历史猜。台账是唯一可机检的完成判据。
+    # 显式写 `spec_ledger: none` 可豁免（留痕，不是静默放行）。
+    if phase in {"review", "handoff"}:
+        declared = values.get("spec_ledger", "").strip().lower()
+        if declared == "none":
+            pass
+        else:
+            errors.extend(_spec_ledger_errors(card, values))
+
     # BDD：收尾交接必须给出结构化行为描述。
     if phase in {"review", "handoff"}:
         if "Given" not in acceptance or "Then" not in acceptance:
             errors.append("BDD 验收必须写成 Given-When-Then，用可观测行为描述结果")
 
+    return errors
+
+
+def _spec_ledger_errors(card: Path, values: dict[str, str]) -> list[str]:
+    """校验 flow/specs/<ticket>.md：必须存在、不得有空编号、不得有未回收项。"""
+    ticket = values.get("ticket_id", "").strip()
+    if not ticket:
+        return ["缺少 ticket_id：无法定位 flow/specs/<ticket>.md 规格点台账"]
+    root = find_project_root(card)
+    declared = values.get("spec_ledger", "").strip()
+    if root and declared and declared.lower() != "none":
+        candidate = (root / declared).resolve()
+        ledger = candidate if str(candidate).startswith(str(root.resolve())) else root / "flow" / "specs" / f"{ticket}.md"
+    else:
+        ledger = (root / "flow" / "specs" / f"{ticket}.md") if root else None
+    if ledger is None or not ledger.is_file():
+        return [
+            f"缺少规格点台账 flow/specs/{ticket}.md：进入 review/handoff 前必须把"
+            f"用户需求蒸馏成规格点并逐条回收（`- [ ] SPE-1 | 规格点 | 证据：`）；"
+            f"确实无规格点的琐碎卡请显式写 `spec_ledger: none`。"
+        ]
+    errors: list[str] = []
+    pending: list[str] = []
+    for raw in ledger.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw.strip()
+        if not line.startswith(("- ", "* ")):
+            continue
+        match = SPE_LINE.match(raw)
+        if not match:
+            errors.append(f"{ledger.name}: 台账行不符格式：{line[:60]}")
+            continue
+        state, spe, evidence = match.group(1), match.group(2), match.group(4).strip()
+        if state == "x" and not evidence:
+            errors.append(f"{ledger.name}: {spe} 标记完成却没有证据（假销账）")
+        elif state != "x":
+            pending.append(spe)
+    if pending:
+        errors.append(
+            f"{ledger.name}: 仍有 {len(pending)} 个规格点未回收（{'、'.join(pending[:5])}"
+            f"{'…' if len(pending) > 5 else ''}）：不得进入 review/handoff。"
+        )
     return errors
 
 

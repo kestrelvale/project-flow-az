@@ -20,6 +20,7 @@ red_test: <execute 阶段先失败的测试文件路径，先红后绿>
 verify_command: <可复现的 Exit 0 验证命令>
 acceptance: <Given-When-Then 或可执行验收断言>
 evidence: <验证凭证路径，交付前填写>
+spec_ledger: flow/specs/P0-1.md
 next_agent: Codex Plan Mode
 next_action: <交接给下一模式的第一个动作>
 
@@ -32,6 +33,8 @@ next_action: <交接给下一模式的第一个动作>
 - 测试决策（测哪些模块、已有同类先例）：
 - 方案边界与不做的事：
 - SDD 原子任务与 I/O 契约：
+- 规格点台账（把用户需求蒸馏成 SPE-n，逐条回收；进 review 前必须全部回收，
+  无规格点的琐碎卡才写 `spec_ledger: none`）：
 - 风险与人工决策门：
 - 退出条件：
 

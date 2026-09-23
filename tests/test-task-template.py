@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 import tempfile
 from pathlib import Path
 
@@ -38,8 +39,24 @@ def main() -> None:
 
     # 模板必须自带严格模式标记与各阶段字段名。
     assert "schema: v2" in text, "模板缺 schema: v2"
-    for field in ("red_test:", "verify_command:", "evidence:", "write_whitelist:", "depends_on:"):
+    for field in (
+        "red_test:",
+        "verify_command:",
+        "evidence:",
+        "write_whitelist:",
+        "depends_on:",
+        "spec_ledger:",
+    ):
         assert field in text, f"模板缺字段 {field}"
+    assert "规格点" in text, "模板未吸收规格点回收要求"
+
+    # 出厂台账模板必须存在，且行格式与 flow-gate / flow-distill 的正则一致。
+    ledger_tpl = ROOT / "assets" / "templates" / "flow" / "specs" / "TEMPLATE.md"
+    assert ledger_tpl.is_file(), "缺出厂规格点台账模板 flow/specs/TEMPLATE.md"
+    ledger_text = ledger_tpl.read_text(encoding="utf-8")
+    assert re.search(r"^-\s*\[[ x\-!]\]\s*SPE-\d+\s*\|.*\|\s*证据：", ledger_text, re.M), (
+        "台账模板的示例行不符合门禁正则"
+    )
 
     # 方法论必须被吸收进模板本体，而不是只写在别处。
     for marker in ("用户故事", "测试决策", "五拍循环", "Given-When-Then", "按需深挖"):
@@ -57,6 +74,11 @@ def main() -> None:
         (root / "tests").mkdir()
         (root / "tests" / "test_x.py").write_text("assert True\n", encoding="utf-8")
         (root / "ev.txt").write_text("Exit 0\n", encoding="utf-8")
+        # 模板声明了 spec_ledger: flow/specs/P0-1.md，进 review 前台账必须存在且已回收。
+        (root / "flow" / "specs").mkdir(parents=True)
+        (root / "flow" / "specs" / "P0-1.md").write_text(
+            "- [x] SPE-1 | 演示目标达成 | 证据：tests/test_x.py Exit 0\n", encoding="utf-8"
+        )
         card = root / "flow" / "tasks" / "T.md"
         for phase in ("plan", "execute", "review", "handoff"):
             # 模板默认 mode: plan，逐阶段切换 mode 后再验门禁。

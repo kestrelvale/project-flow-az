@@ -47,6 +47,9 @@ STOP_TOOL_CALLS = 160
 # （最高累积 371 次工具调用），但 8 个会话里只有 1 个把接力提示词写进过回复，
 # 其余直接继续施工到会话结束——触发层正常，强制层缺失。
 BUDGET_DIR = "budget"
+# 检查点文件（覆盖式，不是时间戳堆积）：记录「上一次中段复查时的工具调用数」，
+# 供开工时判断复查节奏是否已经过期。与熔断回执分开——回执只由开工判定写。
+GUARD_FILE = "guard.json"
 
 
 def top_handoff_head(flow: Path) -> str:
@@ -327,6 +330,24 @@ def main() -> int:
     if args.guard:
         # 中段复查：一个 turn 内跑几百次工具调用时，开工那一次预算判定早就过期了。
         # 无 Hook 的前提下，只能把「复查」做成一条可以被明确调用的命令。
+        checkpoint = Path(args.project) / "flow" / BUDGET_DIR / GUARD_FILE
+        if checkpoint.parent.is_dir():
+            checkpoint.write_text(
+                json.dumps(
+                    {
+                        "operation": "guard_checkpoint",
+                        "thread_id": args.thread_id,
+                        "checked_at": datetime.now().isoformat(timespec="seconds"),
+                        "tool_calls": report["tool_calls"],
+                        "level": report["level"],
+                        "input_tokens": report["input_tokens"],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
         if report["level"] == "OK":
             print("project-flow 中段复查 [OK]：可继续，但每 50 次工具调用再复查一次。")
             return 0
