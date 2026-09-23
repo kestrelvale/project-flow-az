@@ -18,6 +18,9 @@ spec.loader.exec_module(module)
 
 
 def write_session(path: Path, input_tokens: int, cached: int, window: int, turns: int) -> None:
+    # turn/call id 必须每文件唯一：真实 rollout 的 id 是 UUID、全局唯一；
+    # 若夹具都写成 turn-0..N，跨文件去重会把不同轮次误判成同一轮。
+    stem = path.stem
     with path.open("w", encoding="utf-8") as handle:
         for index in range(turns):
             handle.write(
@@ -26,7 +29,7 @@ def write_session(path: Path, input_tokens: int, cached: int, window: int, turns
                         "type": "event_msg",
                         "payload": {
                             "type": "task_started",
-                            "turn_id": f"turn-{index}",
+                            "turn_id": f"{stem}-turn-{index}",
                             "model_context_window": window,
                         },
                     },
@@ -59,7 +62,7 @@ def write_session(path: Path, input_tokens: int, cached: int, window: int, turns
             json.dumps(
                 {
                     "type": "response_item",
-                    "payload": {"type": "function_call", "name": "exec_command"},
+                    "payload": {"type": "function_call", "name": "exec_command", "call_id": f"{stem}-call-{index}"},
                 },
                 ensure_ascii=False,
             )
@@ -164,7 +167,7 @@ def main() -> None:
             text=True, capture_output=True,
         )
         assert aggregated.returncode == 1, (aggregated.returncode, aggregated.stdout)
-        assert "轮次 35 >= 25" in aggregated.stdout, aggregated.stdout
+        assert "轮次 33 >= 25" in aggregated.stdout, aggregated.stdout
         # 「要在对话框上打印提示词再结束」：STOP 且上轮回复没贴提示词时必须点名。
         assert "上轮回复缺失接力提示词" in aggregated.stdout, aggregated.stdout
         assert "1 个 rollout 文件" not in aggregated.stdout or "2 个 rollout 文件" in aggregated.stdout

@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -370,6 +371,82 @@ def latest_receipt_path(flow: Path, thread_id: str = "") -> Path | None:
     return candidates[-1]
 
 
+def _handoff_blocks(text: str) -> list[tuple[str, str]]:
+    """把文本切成 (标题, 整块) 的交接块列表。"""
+    lines = text.splitlines()
+    blocks: list[tuple[str, str]] = []
+    start = None
+    for index, line in enumerate(lines):
+        if line.startswith(("## ", "### ")):
+            if start is not None:
+                blocks.append((lines[start], "\n".join(lines[start:index])))
+            start = index
+    if start is not None:
+        blocks.append((lines[start], "\n".join(lines[start:])))
+    return blocks
+
+
+def all_handoff_blocks(flow: Path) -> list[tuple[str, str]]:
+    """`进展.md` 里的全部交接块（含被顶到下面的），顶部那条排第一。"""
+    progress = flow / "进展.md"
+    if not progress.is_file():
+        return []
+    return _handoff_blocks(progress.read_text(encoding="utf-8", errors="replace"))
+
+
+def archived_handoff_blocks(flow: Path) -> list[tuple[str, str]]:
+    """归档里的交接块：滚动保留把顶掉的交接搬到了 flow/history/progress/。"""
+    blocks: list[tuple[str, str]] = []
+    for path in sorted((flow / "history" / "progress").glob("*.md")):
+        blocks.extend(_handoff_blocks(path.read_text(encoding="utf-8", errors="replace")))
+    return blocks
+
+
+def text_thread_id(text: str) -> str:
+    match = HANDOFF_THREAD_RE.search(text)
+    return match.group(1).lower() if match else ""
+
+
+def block_acceptable(flow: Path, thread_id: str, body: str) -> bool:
+    """用同一套校验（flow-distill）验证任意交接块，而不是只看顶部那条。"""
+    if not DISTILL_SCRIPT.is_file():
+        return True
+    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as handle:
+        handle.write(body)
+        temp = Path(handle.name)
+    try:
+        args = [sys.executable, str(DISTILL_SCRIPT), "handoff", "--project", str(flow.parent),
+                "--text-file", str(temp)]
+        if thread_id:
+            args.extend(["--thread-id", thread_id])
+        return subprocess.run(args, text=True, capture_output=True).returncode == 0
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def displaced_handoff_note(flow: Path, thread_id: str, owner: str) -> str:
+    """交接棒被并发会话顶掉时，说明「已按哪一条核销」，不再让用户以为卡死。
+
+    事故依据（2026-09-23）：`01a0c297` / `01a0c6f8` 两个会话的交接棒被顶到下面，
+    结果它们各自的熔断永远核销不掉、每次开工都被柔性阻塞。
+    """
+    if not owner:
+        return ""
+    for index, (title, body) in enumerate(all_handoff_blocks(flow)[1:], start=2):
+        if text_thread_id(title + body) == owner and block_acceptable(flow, thread_id, body):
+            return (
+                f"你的交接棒已被并发会话顶掉（现在排在第 {index} 条），"
+                f"但已按它核销本次熔断：`{title[:60]}`"
+            )
+    for title, body in archived_handoff_blocks(flow):
+        if text_thread_id(title + body) == owner and block_acceptable(flow, thread_id, body):
+            return (
+                f"你的交接棒已被滚动归档（flow/history/progress/），"
+                f"但已按它核销本次熔断：`{title[:60]}`"
+            )
+    return ""
+
+
 def read_pending_stop(flow: Path, thread_id: str = "", receipt_path: Path | None = None) -> tuple[Path | None, dict[str, object]]:
     """最近一次预算 STOP 是否还没被交接棒消化。
 
@@ -406,6 +483,23 @@ def read_pending_stop(flow: Path, thread_id: str = "", receipt_path: Path | None
         and (not owner or declared == owner)
     ):
         return None, data
+    # 顶部不是本会话的交接（被并发会话顶掉）时，继续往下找本会话自己的那条：
+    # 否则它的熔断永远核销不掉 —— 实测 01a0c297 / 01a0c6f8 就是这样被卡死的。
+    if owner and owner != declared:
+        for other_title, other_body in all_handoff_blocks(flow)[1:]:
+            if other_title == str(data.get("handoff_head", "")):
+                continue
+            if text_thread_id(other_title + other_body) != owner:
+                continue
+            if block_acceptable(flow, thread_id, other_body):
+                return None, data
+        for other_title, other_body in archived_handoff_blocks(flow):
+            if other_title == str(data.get("handoff_head", "")):
+                continue
+            if text_thread_id(other_title + other_body) != owner:
+                continue
+            if block_acceptable(flow, thread_id, other_body):
+                return None, data
     return latest, data
 
 
@@ -1284,6 +1378,15 @@ def main() -> int:
     # 所以这里在预算跑完之后取，由 latest_receipt_path 排除刚写的这条。
     pending_receipt = latest_receipt_path(flow_dir, thread_id)
     stop_reports = render_stop_reports(flow_dir, thread_id, pending_receipt)
+    # 交接棒被顶掉/被归档时，明确告诉用户「已按哪一条核销」，而不是让人以为卡死。
+    displaced_note = ""
+    if pending_receipt is not None:
+        try:
+            owner = str(json.loads(pending_receipt.read_text(encoding="utf-8")).get("thread_id") or "")
+        except (OSError, json.JSONDecodeError):
+            owner = ""
+        if owner and not stop_reports:
+            displaced_note = displaced_handoff_note(flow_dir, thread_id, owner)
     guard_problem = read_guard_staleness(flow_dir, budget_output)
     soft_blocked = bool(stop_reports) or bool(guard_problem)
     distill_problems, distill_notes = run_distill_checks(project_root, thread_id)
@@ -1336,6 +1439,9 @@ def main() -> int:
     )
     if distill_notes:
         print("\n" + "\n".join(distill_notes))
+    if displaced_note:
+        print("\nproject-flow 交接棒位置提示")
+        print(f"- {displaced_note}")
     print("\nproject-flow 接管路由")
     print(f"- 项目: {project_root}")
     if active_tasks:

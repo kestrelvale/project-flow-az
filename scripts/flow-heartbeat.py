@@ -144,11 +144,14 @@ def main() -> int:
         if now - float(state.get(key, 0)) < QUIET_SECONDS:
             continue
         state[key] = now
+        invisible = not report.get("relay_prompt_in_reply", True)
         alerts.append(
             f"[{level}] {project.name} / {thread_id[:12]} — "
             f"输入 {report.get('input_tokens', 0):,}/{report.get('context_window', 0):,} "
             f"({report.get('context_ratio', 0):.1%})，轮次 {report.get('rounds')}，"
-            f"工具调用 {report.get('tool_calls')}；该交接了（写 SDD 蒸馏交接棒 + 规格点台账后开新会话）"
+            f"工具调用 {report.get('tool_calls')}"
+            + ("；**上轮回复里没有接力提示词（用户看不到交接指引）**" if invisible else "")
+            + "；该交接了（写 SDD 蒸馏交接棒 + 规格点台账后开新会话）"
         )
 
     if alerts:

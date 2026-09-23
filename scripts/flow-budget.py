@@ -293,6 +293,10 @@ def summarize(path: Path) -> dict:
         "context_ratio": ratio,
         "rounds": len(rounds),
         "tool_calls": tool_calls,
+        # 供跨文件聚合精确去重：不同 rollout 文件的时间区间可能重叠，
+        # 单纯累加会重复计数（第 6 点缺口）。
+        "turn_ids": sorted(rid for rid in rounds if rid),
+        "call_ids": sorted(seen_tool_call_ids),
         "last_event": last_event,
     }
 
@@ -333,8 +337,14 @@ def summarize_thread(paths: list[Path]) -> dict:
     if not reports:
         return {}
     newest = reports[0]  # paths 已按 mtime 新→旧
-    rounds_total = sum(int(item.get("rounds") or 0) for item in reports)
-    calls_total = sum(int(item.get("tool_calls") or 0) for item in reports)
+    # 精确去重：按 turn_id / call_id 取并集，避免文件区间重叠时重复计数（第 6 点缺口）。
+    turn_ids: set[str] = set()
+    call_ids: set[str] = set()
+    for item in reports:
+        turn_ids.update(item.get("turn_ids") or [])
+        call_ids.update(item.get("call_ids") or [])
+    rounds_total = len(turn_ids) if turn_ids else sum(int(item.get("rounds") or 0) for item in reports)
+    calls_total = len(call_ids) if call_ids else sum(int(item.get("tool_calls") or 0) for item in reports)
     peak_input = max(
         [int(item.get("max_input_tokens") or 0) for item in reports]
         + [int(item.get("input_tokens") or 0) for item in reports]
@@ -510,6 +520,8 @@ def main() -> int:
 
     report = summarize_thread(sessions)
     report["session_file"] = str(sessions[0])
+    # 第 3 点：提示词是否已出现在那一轮的对外回复里。放进报告，外部心跳才能体检。
+    report["relay_prompt_in_reply"] = relay_prompt_visible(last_visible_reply(sessions))
     prompt = handoff_prompt(args.intent or DEFAULT_INTENT, report)
     if args.print_relay:
         # 「要求交接却没有交接提示词」的正面修复：无论当前会话判级如何，
@@ -594,8 +606,7 @@ def main() -> int:
     if report["level"] in {"WARN", "STOP"}:
         # 用户反馈：「应该先在对话框上打印出交接提示词再结束，而不是直接熔断」。
         # 提示词光在工具输出里不够——它必须出现在那一轮的对外回复里。
-        reply = last_visible_reply(sessions)
-        if not relay_prompt_visible(reply):
+        if not report.get("relay_prompt_in_reply"):
             print("\nproject-flow 上轮回复缺失接力提示词（必须在本轮回复里原样贴出）")
             print("- 判据：task_complete.last_agent_message 里必须同时出现「接力提示词」、"
                   "`flow-boot.py` 与 `--intent`。")

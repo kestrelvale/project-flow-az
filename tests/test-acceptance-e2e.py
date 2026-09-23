@@ -38,9 +38,10 @@ def make_project(root: Path, ledger: str | None) -> Path:
     return flow
 
 def write_session(path: Path, turns: int, input_tokens: int = 40_000) -> None:
+    stem = path.stem   # 唯一 id：真实 rollout 的 turn/call id 全局唯一
     with path.open("w", encoding="utf-8") as h:
         for i in range(turns):
-            h.write(json.dumps({"type":"event_msg","payload":{"type":"task_started","turn_id":f"turn-{i}","model_context_window":950_000}}, ensure_ascii=False)+"\n")
+            h.write(json.dumps({"type":"event_msg","payload":{"type":"task_started","turn_id":f"{stem}-turn-{i}","model_context_window":950_000}}, ensure_ascii=False)+"\n")
         h.write(json.dumps({"type":"token_usage_record","payload":{"usage":{"input_tokens":input_tokens,"cached_input_tokens":0},"turn_token_usage":{"input_tokens":input_tokens,"output_tokens":10},"thread_token_usage":{"input_tokens":input_tokens},"session_file":str(path)}}, ensure_ascii=False)+"\n")
         for i in range(turns):
             h.write(json.dumps({"type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":f"c{i}"}}, ensure_ascii=False)+"\n")
@@ -56,7 +57,7 @@ def main() -> int:
     write_session(sessions/f"rollout-new-{UID}.jsonl", 8)
     r = run(BUDGET,"--thread-id",UID,"--sessions-root",sessions,"--project",root,"--read-only","--json")
     rep = json.loads(r.stdout or "{}")
-    check(rep.get("level") == "STOP" and rep.get("rounds") == 30, "跨文件聚合判 STOP（轮次 20+1 + 8+1 = 30 ≥ 25）", str(rep.get("level"))+" rounds="+str(rep.get("rounds")))
+    check(rep.get("level") == "STOP" and rep.get("rounds") == 28, "跨文件聚合判 STOP（去重后轮次 20+8 = 28 ≥ 25）", str(rep.get("level"))+" rounds="+str(rep.get("rounds")))
 
     print("[2] 提示词必须在回复里出现（回复可见性机检）")
     r = run(BUDGET,"--thread-id",UID,"--sessions-root",sessions,"--project",root,"--read-only")

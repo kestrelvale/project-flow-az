@@ -100,8 +100,10 @@ def top_handoff(flow: Path) -> str:
     return "\n".join(lines[start:end])
 
 
-def check_handoff(flow: Path, thread_id: str, sessions_root: Path) -> list[str]:
-    body = top_handoff(flow)
+def check_handoff(
+    flow: Path, thread_id: str, sessions_root: Path, text_file: Path | None = None
+) -> list[str]:
+    body = text_file.read_text(encoding="utf-8", errors="replace") if text_file else top_handoff(flow)
     if not body:
         return []
     problems: list[str] = []
@@ -179,6 +181,12 @@ def main() -> int:
     parser.add_argument("--project", type=Path, default=Path("."))
     parser.add_argument("--ticket", default="")
     parser.add_argument("--thread-id", default="")
+    parser.add_argument(
+        "--text-file",
+        type=Path,
+        default=None,
+        help="校验指定文件里的交接棒文本（默认读 flow/进展.md 顶部）；用于核销被顶掉的旧交接棒",
+    )
     parser.add_argument("--sessions-root", type=Path, default=Path.home() / ".codex" / "sessions")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
@@ -194,7 +202,7 @@ def main() -> int:
             print("project-flow 交接棒蒸馏校验")
             print("! 缺少 --thread-id：无法取用户消息做照抄比对，交接棒不得视为通过。")
             return 1
-        problems = check_handoff(flow, args.thread_id, args.sessions_root)
+        problems = check_handoff(flow, args.thread_id, args.sessions_root, args.text_file)
         if problems:
             print("project-flow 交接棒蒸馏校验")
             for problem in problems:
