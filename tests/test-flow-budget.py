@@ -165,6 +165,8 @@ def main() -> None:
         )
         assert aggregated.returncode == 1, (aggregated.returncode, aggregated.stdout)
         assert "轮次 35 >= 25" in aggregated.stdout, aggregated.stdout
+        # 「要在对话框上打印提示词再结束」：STOP 且上轮回复没贴提示词时必须点名。
+        assert "上轮回复缺失接力提示词" in aggregated.stdout, aggregated.stdout
         assert "1 个 rollout 文件" not in aggregated.stdout or "2 个 rollout 文件" in aggregated.stdout
 
         relay = subprocess.run(

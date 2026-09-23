@@ -1278,6 +1278,13 @@ def main() -> int:
     handoff_problems.extend(distill_problems)
     if guard_problem:
         handoff_problems.append(guard_problem)
+    if "上轮回复缺失接力提示词" in budget_output:
+        # 用户反馈：「应该在对话框上打印出交接提示词再结束，而不是直接熔断」。
+        # 这条来自 flow-budget 的机检；放到路由阻塞里，模型开工就被点名。
+        handoff_problems.append(
+            "上一轮熔断没有把接力提示词贴进回复：本轮必须把 flow-budget 输出的那段"
+            "「project-flow 接力提示词」原样复制到回复里，再结束本轮；只写「已熔断」不算交接。"
+        )
     delivery_reports = audit_deliveries(project_root / "flow", pending_tasks)
     claim_reports = (
         []

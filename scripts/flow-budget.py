@@ -363,6 +363,40 @@ def summarize_thread(paths: list[Path]) -> dict:
     return aggregate
 
 
+def last_visible_reply(paths: list[Path]) -> str:
+    """取该 thread 最后一轮**用户可见的回复**。
+
+    `task_complete.last_agent_message` 就是那一轮的对外回复，是判断
+    「熔断提示词有没有真的贴给用户看」的唯一可靠依据。
+    """
+    for path in paths:  # 新→旧，取最新那个文件的最后一条即可
+        last = ""
+        try:
+            with path.open(encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    if '"last_agent_message"' not in line:
+                        continue
+                    try:
+                        payload = json.loads(line).get("payload") or {}
+                    except json.JSONDecodeError:
+                        continue
+                    if payload.get("type") == "task_complete":
+                        last = str(payload.get("last_agent_message") or "") or last
+        except OSError:
+            continue
+        if last:
+            return last
+    return ""
+
+
+RELAY_MARKERS = ("接力提示词", "flow-boot.py", "--intent")
+
+
+def relay_prompt_visible(reply: str) -> bool:
+    """回复里是否真的出现了接力提示词（用户要「在对话框上打印出来再结束」）。"""
+    return bool(reply) and all(marker in reply for marker in RELAY_MARKERS)
+
+
 def handoff_prompt(intent: str, report: dict) -> str:
     return "\n".join(
         [
@@ -524,6 +558,14 @@ def main() -> int:
         print("- 先做 SDD 拆卡：任务偏大时回上游 flow/plan.md 把本卡拆成原子卡，不要靠加大读取硬推。")
         print("- 收尾前把规格点/待办写进 flow/specs/<ticket>.md，达到熔断线直接交接，不必撑到自动压缩。")
     if report["level"] in {"WARN", "STOP"}:
+        # 用户反馈：「应该先在对话框上打印出交接提示词再结束，而不是直接熔断」。
+        # 提示词光在工具输出里不够——它必须出现在那一轮的对外回复里。
+        reply = last_visible_reply(sessions)
+        if not relay_prompt_visible(reply):
+            print("\nproject-flow 上轮回复缺失接力提示词（必须在本轮回复里原样贴出）")
+            print("- 判据：task_complete.last_agent_message 里必须同时出现「接力提示词」、"
+                  "`flow-boot.py` 与 `--intent`。")
+            print("- 以下整段必须原样复制进你的回复，再结束本轮；只写「已熔断」不算交接。")
         print("\nproject-flow 接力提示词")
         print(prompt)
     if report["level"] == "STOP":
