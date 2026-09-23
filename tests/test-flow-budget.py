@@ -149,6 +149,24 @@ def main() -> None:
         assert "每 50 次工具调用" in cool.stdout, cool.stdout
 
         # --print-relay：按需取回交接提示词；有回执时优先用回执里存的那份。
+        # 同一 thread 分叉成多个 rollout 文件时必须聚合判级（2026-09-23 实测漏判）：
+        # 旧实现只看 mtime 最新那个文件，thread 01a0c297 早期峰值 917,686 完全看不见，
+        # 于是「到线了却从没触发交接」。
+        multi = root / "sessions-multi"
+        multi.mkdir()
+        write_session(multi / "rollout-old-thread-multi.jsonl", 40_000, 0, 950_000, 30)
+        write_session(multi / "rollout-new-thread-multi.jsonl", 40_000, 0, 950_000, 3)
+        newest_only = multi / "rollout-new-thread-multi.jsonl"
+        assert module.summarize(newest_only)["level"] == "OK", "单个新文件本身确实不该 STOP"
+        aggregated = subprocess.run(
+            [sys.executable, str(script), "--thread-id", "thread-multi",
+             "--sessions-root", str(multi), "--project", str(project), "--read-only"],
+            text=True, capture_output=True,
+        )
+        assert aggregated.returncode == 1, (aggregated.returncode, aggregated.stdout)
+        assert "轮次 35 >= 25" in aggregated.stdout, aggregated.stdout
+        assert "1 个 rollout 文件" not in aggregated.stdout or "2 个 rollout 文件" in aggregated.stdout
+
         relay = subprocess.run(
             [sys.executable, str(script), "--thread-id", "thread-guard",
              "--print-relay", "--sessions-root", str(sessions), "--project", str(project)],

@@ -129,6 +129,69 @@ def find_session_file(thread_id: str, sessions_root: Path | None = None) -> Path
     return matches[0] if matches else None
 
 
+def find_session_files(thread_id: str, sessions_root: Path | None = None) -> list[Path]:
+    """取该 thread 的**全部** rollout 文件（新→旧）。
+
+    缺陷（2026-09-23 实测，thread 01a0c297）：同一 thread 会分叉成多个 rollout 文件
+    （续跑/重开各写一个）。旧实现只取 mtime 最新的那一个，于是早期文件里
+    单次输入 **917,686**（91.7 万，远超熔断线）的峰值完全看不见，
+    预算一直报 OK、交接永远不触发——用户看到的就是「到线了却从没触发交接」。
+    """
+    root = sessions_root or (Path.home() / ".codex" / "sessions")
+    return sorted(
+        root.rglob(f"*{thread_id}*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True
+    )
+
+
+def classify_level(
+    input_tokens: int, context_window: int, rounds_count: int, tool_calls: int
+) -> tuple[str, list[str]]:
+    """唯一的判级实现（summarize / summarize_thread 共用，避免两处逻辑分叉）。
+
+    口径（2026-09-23 定）：
+    - **当前上下文**（单次输入/窗口比例）决定「压缩风险」；
+    - **累计规模**（轮次/工具调用，跨 rollout 文件累加）决定「漂移风险」——
+      它不随压缩回落，因此能抓住「会话早就该交接了」；
+    - 历史峰值只作为证据打印，不单独判级，否则一个已经压缩回落的 thread
+      会被永久判 STOP，形成「每次开工都要交接」的死循环。
+    """
+    ratio = input_tokens / context_window if context_window else 0.0
+    reasons: list[str] = []
+    if context_window:
+        context_stop = ratio >= STOP_RATIO
+        context_warn = ratio >= WARN_RATIO
+    else:
+        context_stop = input_tokens >= STOP_INPUT_TOKENS
+        context_warn = input_tokens >= WARN_INPUT_TOKENS
+    volume_stop = rounds_count >= STOP_ROUNDS or tool_calls >= STOP_TOOL_CALLS
+    volume_warn = rounds_count >= WARN_ROUNDS or tool_calls >= WARN_TOOL_CALLS
+    level = "STOP" if (context_stop or volume_stop) else ("WARN" if (context_warn or volume_warn) else "OK")
+    if context_window and input_tokens > context_window:
+        reasons.append(f"单次输入 {input_tokens} 已超过记录的上下文窗口 {context_window}")
+    if context_stop:
+        reasons.append(
+            f"上下文占用 {ratio:.1%} / 单次输入 {input_tokens}（熔断线 {STOP_RATIO:.0%}"
+            + (f" = {int(context_window * STOP_RATIO):,}" if context_window else f" / {STOP_INPUT_TOKENS:,}")
+            + f"；实测模型在 {MODEL_FAILURE_RATIO:.1%} 窗口处开始回放用户消息）"
+        )
+    elif context_warn:
+        reasons.append(
+            f"上下文占用 {ratio:.1%} / 单次输入 {input_tokens}"
+            + (f"（预警线 {WARN_RATIO:.0%}；先按 SDD 拆卡，再交接）" if context_window else "（接近熔断线，先做 SDD 拆卡）")
+        )
+    if rounds_count >= STOP_ROUNDS:
+        reasons.append(f"轮次 {rounds_count} >= {STOP_ROUNDS}")
+    elif rounds_count >= WARN_ROUNDS:
+        reasons.append(f"轮次 {rounds_count} >= {WARN_ROUNDS}")
+    if tool_calls >= STOP_TOOL_CALLS:
+        reasons.append(f"工具调用 {tool_calls} >= {STOP_TOOL_CALLS}")
+    elif tool_calls >= WARN_TOOL_CALLS:
+        reasons.append(f"工具调用 {tool_calls} >= {WARN_TOOL_CALLS}")
+    if not reasons:
+        reasons.append("预算正常")
+    return level, reasons
+
+
 def summarize(path: Path) -> dict:
     usage = {}
     last_request_usage = {}
@@ -138,6 +201,9 @@ def summarize(path: Path) -> dict:
     tool_calls = 0
     seen_tool_call_ids: set[str] = set()
     last_event = None
+    # 文件内**单次输入峰值**：末尾值可能已被压缩回落（实测 917k 峰值 / 155k 末尾），
+    # 只看末尾会漏判「早就该熔断」。
+    max_request_input = 0
 
     with path.open(encoding="utf-8", errors="replace") as handle:
         for line in handle:
@@ -158,6 +224,9 @@ def summarize(path: Path) -> dict:
                     last = info.get("last_token_usage") or {}
                     total = info.get("total_token_usage") or {}
                     if last:
+                        max_request_input = max(
+                            max_request_input, int(last.get("input_tokens") or 0)
+                        )
                         last_request_usage = {
                             "input_tokens": int(last.get("input_tokens") or 0),
                             "cached_input_tokens": int(last.get("cached_input_tokens") or 0),
@@ -203,53 +272,18 @@ def summarize(path: Path) -> dict:
 
     usage = last_request_usage or usage
     input_tokens = usage.get("input_tokens", 0)
+    max_request_input = max(max_request_input, int(input_tokens or 0))
     cached = usage.get("cached_input_tokens", 0)
     ratio = input_tokens / context_window if context_window else 0.0
     cache_ratio = cached / input_tokens if input_tokens else 0.0
-    level = "OK"
-    reasons: list[str] = []
-    # 有窗口就按比例（锚在会话自己声明的有效窗口上）；读不到窗口才退回绝对值。
-    if context_window:
-        context_stop = ratio >= STOP_RATIO
-        context_warn = ratio >= WARN_RATIO
-    else:
-        context_stop = input_tokens >= STOP_INPUT_TOKENS
-        context_warn = input_tokens >= WARN_INPUT_TOKENS
-    volume_stop = len(rounds) >= STOP_ROUNDS or tool_calls >= STOP_TOOL_CALLS
-    volume_warn = len(rounds) >= WARN_ROUNDS or tool_calls >= WARN_TOOL_CALLS
-    if context_stop or volume_stop:
-        level = "STOP"
-    elif context_warn or volume_warn:
-        level = "WARN"
-    if input_tokens > context_window:
-        reasons.append(f"单次输入 {input_tokens} 已超过记录的上下文窗口 {context_window}")
-    if context_stop:
-        reasons.append(
-            f"上下文占用 {ratio:.1%} / 单次输入 {input_tokens}（熔断线 {STOP_RATIO:.0%}"
-            + (f" = {int(context_window * STOP_RATIO):,}" if context_window else f" / {STOP_INPUT_TOKENS:,}")
-            + f"；实测模型在 {MODEL_FAILURE_RATIO:.1%} 窗口处开始回放用户消息）"
-        )
-    elif context_warn:
-        reasons.append(
-            f"上下文占用 {ratio:.1%} / 单次输入 {input_tokens}"
-            + (f"（预警线 {WARN_RATIO:.0%}；先按 SDD 拆卡，再交接）" if context_window else "（接近熔断线，先做 SDD 拆卡）")
-        )
-    if len(rounds) >= STOP_ROUNDS:
-        reasons.append(f"轮次 {len(rounds)} >= {STOP_ROUNDS}")
-    elif len(rounds) >= WARN_ROUNDS:
-        reasons.append(f"轮次 {len(rounds)} >= {WARN_ROUNDS}")
-    if tool_calls >= STOP_TOOL_CALLS:
-        reasons.append(f"工具调用 {tool_calls} >= {STOP_TOOL_CALLS}")
-    elif tool_calls >= WARN_TOOL_CALLS:
-        reasons.append(f"工具调用 {tool_calls} >= {WARN_TOOL_CALLS}")
-    if not reasons:
-        reasons.append("预算正常")
+    level, reasons = classify_level(input_tokens, context_window, len(rounds), tool_calls)
 
     return {
         "session_file": str(path),
         "level": level,
         "reasons": reasons,
         "input_tokens": input_tokens,
+        "max_input_tokens": max_request_input,
         "cached_input_tokens": cached,
         "cache_ratio": cache_ratio,
         "output_tokens": usage.get("output_tokens", 0),
@@ -281,6 +315,52 @@ HANDOFF_TEMPLATE = """## <日期> · <ticket> · 交接棒（SDD 蒸馏） · th
 - 卡在哪：<阻塞 + 解除条件>
 - 下一步：<新会话第一件事，含门禁命令>
 - 台账：flow/specs/<ticket>.md（未回收项是唯一待办源，已完成项不得重跑）"""
+
+
+def summarize_thread(paths: list[Path]) -> dict:
+    """把同一 thread 的多个 rollout 文件聚合成一条判定。
+
+    缺陷（2026-09-23 实测 thread 01a0c297）：同一 thread 会分叉成多个 rollout 文件，
+    旧实现只看 mtime 最新那一个 —— 早期文件里单次输入峰值 **917,686**（远超 45 万熔断线）
+    完全看不见，于是「到线了却从没触发交接」。
+
+    聚合口径：
+    - 当前上下文（最新文件的单次输入）→ 走 classify_level 的压缩风险；
+    - 轮次 / 工具调用按文件**累加** → 漂移风险（不随压缩回落，能抓住「早就该交接」）；
+    - 历史峰值只作证据打印，不单独判级（否则压缩回落后的 thread 会被永久判 STOP）。
+    """
+    reports = [summarize(path) for path in paths]
+    if not reports:
+        return {}
+    newest = reports[0]  # paths 已按 mtime 新→旧
+    rounds_total = sum(int(item.get("rounds") or 0) for item in reports)
+    calls_total = sum(int(item.get("tool_calls") or 0) for item in reports)
+    peak_input = max(
+        [int(item.get("max_input_tokens") or 0) for item in reports]
+        + [int(item.get("input_tokens") or 0) for item in reports]
+    )
+    level, reasons = classify_level(
+        int(newest.get("input_tokens") or 0),
+        int(newest.get("context_window") or 0),
+        rounds_total,
+        calls_total,
+    )
+    aggregate = dict(newest)
+    aggregate["level"] = level
+    aggregate["reasons"] = reasons
+    aggregate["rounds"] = rounds_total
+    aggregate["tool_calls"] = calls_total
+    aggregate["max_input_tokens"] = peak_input
+    aggregate["thread_input_tokens"] = sum(
+        int(item.get("thread_input_tokens") or 0) for item in reports
+    )
+    aggregate["session_files"] = [str(path) for path in paths]
+    if len(paths) > 1:
+        aggregate["reasons"].append(
+            f"该 thread 共 {len(paths)} 个 rollout 文件：轮次/工具调用按文件累加；"
+            f"历史峰值单次输入 {peak_input:,}（仅作证据，不单独判级）"
+        )
+    return aggregate
 
 
 def handoff_prompt(intent: str, report: dict) -> str:
@@ -355,12 +435,13 @@ def main() -> int:
     if not args.thread_id:
         print("project-flow 预算: 无法定位当前会话（缺少 CODEX_THREAD_ID）")
         return 0
-    session = find_session_file(args.thread_id, args.sessions_root)
-    if session is None:
+    sessions = find_session_files(args.thread_id, args.sessions_root)
+    if not sessions:
         print(f"project-flow 预算: 未找到 session jsonl: {args.thread_id}")
         return 0
 
-    report = summarize(session)
+    report = summarize_thread(sessions)
+    report["session_file"] = str(sessions[0])
     prompt = handoff_prompt(args.intent or DEFAULT_INTENT, report)
     if args.print_relay:
         # 「要求交接却没有交接提示词」的正面修复：无论当前会话判级如何，
@@ -427,7 +508,10 @@ def main() -> int:
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 1 if report["level"] == "STOP" else 0
 
-    print(f"project-flow 预算 [{report['level']}]: {session}")
+    file_note = ""
+    if len(sessions) > 1:
+        file_note = f"（该 thread 共 {len(sessions)} 个 rollout 文件：轮次/调用量累加，历史峰值仅作证据）"
+    print(f"project-flow 预算 [{report['level']}]: {sessions[0]}{file_note}")
     print(
         f"- 单次输入 {report['input_tokens']} / 窗口 {report['context_window']} "
         f"({report['context_ratio']:.1%}), 缓存 {report['cache_ratio']:.1%}, "
