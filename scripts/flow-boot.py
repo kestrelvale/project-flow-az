@@ -543,6 +543,21 @@ def displaced_handoff_note(flow: Path, thread_id: str, owner: str) -> str:
     return ""
 
 
+def _previous_receipt(flow: Path, receipt_path: Path) -> dict[str, object] | None:
+    """同目录里排在该回执之前的那条熔断回执（用于判断「这轮落过新交接棒没有」）。"""
+    receipts = sorted((flow / BUDGET_DIR).glob("*-stop.json"))
+    try:
+        index = receipts.index(receipt_path)
+    except ValueError:
+        return None
+    if index == 0:
+        return None
+    try:
+        return json.loads(receipts[index - 1].read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
 def read_pending_stop(flow: Path, thread_id: str = "", receipt_path: Path | None = None) -> tuple[Path | None, dict[str, object]]:
     """最近一次预算 STOP 是否还没被交接棒消化。
 
@@ -566,6 +581,24 @@ def read_pending_stop(flow: Path, thread_id: str = "", receipt_path: Path | None
         data = json.loads(latest.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None, {}
+    # 快照撞上它自己：当事会话**先落交接棒、后由开工时的预算检查写回执**时，
+    # `handoff_head` 抓到的就是它刚写的那条标题，与顶部标题永远相等 ——
+    # 加上兜底扫描要求 `owner != declared`（此处 declared == owner），
+    # 这条回执对**任何新会话**都是永久柔性阻塞（2026-09-24 实测 wt-p4 01a0c1cd）。
+    # 判据：同目录上一条回执的快照与它不同 = 这轮确实落过新交接棒 = 债务已结清。
+    # 反过来「熔断后没写交接棒」时两个快照相同，仍然 fail-closed。
+    if str(data.get("handoff_head") or "") == latest_handoff(flow)[0]:
+        previous = _previous_receipt(flow, latest)
+        if previous and str(previous.get("handoff_head") or "") != str(data.get("handoff_head") or ""):
+            data["_self_reference_cleared"] = True
+            title, _ = latest_handoff(flow)
+            owner_now = str(data.get("thread_id") or "").lower()
+            if (
+                title
+                and handoff_is_acceptable(flow, thread_id)
+                and (not owner_now or handoff_thread_id(flow) == owner_now)
+            ):
+                return None, data
     # 交接棒是否补上：标题与熔断当时不同 **且** 通过蒸馏/字段校验 **且** 来源会话对得上。
     # 只看标题会被一句占位标题绕过（见 handoff_is_acceptable 注释）；
     # 只看新标题又会让并发会话的交接棒替别人核销熔断（2026-09-23 实测踩到）。
