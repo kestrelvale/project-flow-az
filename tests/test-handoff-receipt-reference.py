@@ -130,7 +130,34 @@ def main() -> None:
     pending5, _ = fb.read_pending_stop(flow5, uid, ref5)
     check("本会话合法交接棒 → 核销（不再被别人的回执卡住）", pending5 is None, str(pending5))
 
-    for root in (root1, root3, root4, root5):
+    # 用例6（实测事故 2026-09-23 thread 01a0ceec）：新会话开工时最新回执属于**上一会话**，
+    # 顶部是上一会话自己写的交接棒。旧实现无条件排除最新回执，参照退回更旧的一条，
+    # 而那条属于早已消失的第三个会话 → 无论新会话写多少交接棒都核销不掉，永久柔性阻塞。
+    dead = "01a0c297-b8e5-7561-9014-570c11a5499e"      # 已消失的第三个会话
+    prev = "01a0ce3d-1a11-74b1-9fe6-78c5242459c9"      # 上一会话（写了交接棒）
+    mine = f"{NEW} · thread={uid}"
+    prev_block = HANDOFF.replace(NEW, f"{NEW} · thread={prev}")
+    # 回执快照只存标题行（真实回执即如此）→ 恰好等于当事会话自己的交接棒标题。
+    prev_title = prev_block.splitlines()[0]
+    root6, flow6 = build(mine + "\n\n" + prev_block, [prev_title, prev_title])
+    for name, tid in (
+        ("20260923-120000-stop.json", dead),  # 更旧：已消失会话的孤儿回执
+        ("20260923-120100-stop.json", prev),  # 最新：上一会话的回执
+    ):
+        path = flow6 / "budget" / name
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["thread_id"] = tid
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    ref6 = fb.latest_receipt_path(flow6, uid)
+    check(
+        "最新回执属于别的会话时仍被引用（不退回更旧的一条）",
+        ref6 is not None and ref6.name == "20260923-120100-stop.json",
+        str(ref6),
+    )
+    pending6, _ = fb.read_pending_stop(flow6, uid, ref6)
+    check("上一会话的合规交接棒被顶到下方后仍可核销", pending6 is None, str(pending6))
+
+    for root in (root1, root3, root4, root5, root6):
         for child in sorted(root.rglob("*"), reverse=True):
             child.unlink() if child.is_file() else child.rmdir()
     print("PASS: 熔断核销以「开工前回执」为参照，且未交接仍被拦住")

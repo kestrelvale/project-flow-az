@@ -349,7 +349,8 @@ def latest_receipt_path(flow: Path, thread_id: str = "") -> Path | None:
        （2026-09-23 thread 01a0c24b 实测：回执 head=PMO、顶部已是它自己的 Wave0 交接棒，
        参照却取到了 thread 01a0c297 的回执）。
 
-    取法：在「排除最新那条」之后，优先选 thread_id 匹配的回执（若有），否则取最近的。
+    取法：只排除「本次开工刚写的那条」（thread_id 等于本会话的那条）；随后优先选
+    thread_id 匹配的回执（若有），否则取最近的一条。
     """
     receipt_dir = flow / BUDGET_DIR
     if not receipt_dir.is_dir():
@@ -359,7 +360,17 @@ def latest_receipt_path(flow: Path, thread_id: str = "") -> Path | None:
         return None
     if len(receipts) == 1:
         return receipts[0]
-    candidates = receipts[:-1]  # 排除本次开工刚写的那条
+    # 只有「本次开工刚写的那条」才排除：thread 对不上说明它是**上一会话**留下的真债务。
+    # 机械丢给 candidates[-1] 会让参照退回更旧的一条，于是已消失会话写的孤儿回执
+    # 永久顶住其后每个新会话——表现是「交接棒写了也解不开」（2026-09-23 实测：
+    # 01a0c297 的 231041 顶住了 01a0ce3d / 01a0ceec 两代新会话）。
+    try:
+        newest_owner = str(
+            json.loads(receipts[-1].read_text(encoding="utf-8")).get("thread_id") or ""
+        )
+    except (OSError, json.JSONDecodeError):
+        newest_owner = ""
+    candidates = receipts[:-1] if newest_owner == thread_id else receipts
     if thread_id:
         for path in reversed(candidates):
             try:
@@ -485,10 +496,11 @@ def read_pending_stop(flow: Path, thread_id: str = "", receipt_path: Path | None
         return None, data
     # 顶部不是本会话的交接（被并发会话顶掉）时，继续往下找本会话自己的那条：
     # 否则它的熔断永远核销不掉 —— 实测 01a0c297 / 01a0c6f8 就是这样被卡死的。
+    # 这里不再跳过「与 handoff_head 同名」的块：回执是在交接序列里写的，当事会话
+    # 先落交接棒、后由预算检查写出回执时，快照必然等于它自己的标题（2026-09-23 实测
+    # 01a0ce3d 因此被永久阻塞）。owner 的合规交接棒本身就是债务已结清的凭据。
     if owner and owner != declared:
         for other_title, other_body in all_handoff_blocks(flow)[1:]:
-            if other_title == str(data.get("handoff_head", "")):
-                continue
             if text_thread_id(other_title + other_body) != owner:
                 continue
             if block_acceptable(flow, thread_id, other_body):
