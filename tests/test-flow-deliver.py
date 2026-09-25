@@ -140,7 +140,10 @@ def main() -> None:
         empty_board = module.render_plan_sections(empty / "plan.md")
         assert "任务状态看板" in empty_board, empty_board
         assert "## 🎯 当前聚焦待办 (P0)" in empty_board and "- 无" in empty_board, empty_board
-        assert "已归档 1 张任务卡" in empty_board, empty_board
+        # v4.15.17 起：归档分区不再输出与事实矛盾的「- 无（…已归档 N 张）」，
+        # 改为真实计数 + 最近归档；见 tests/test-report-visibility.py。
+        assert "已归档 1 张" in empty_board, empty_board
+        assert "最近：A" in empty_board, empty_board
         assert "## 💡 本轮决策记录 (Decisions)" in empty_board, empty_board
 
         # plan.md 不存在时也必须给出完整四分区，而非单行报错。

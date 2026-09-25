@@ -204,14 +204,16 @@ def main() -> None:
         assert "flow/specs/<ticket>.md 里状态" not in text, text[-1200:]
         assert "工作根" in text, text[-1200:]
 
-        # SPE-3 负向：识别不出 ticket 时保留占位符、提示词仍可用（不崩、不阻塞）。
+        # SPE-3 负向：识别不出 ticket 时，不得给出会指向不存在文件的占位符路径，
+        # 而是照实说「未指定」并要求从活跃区候选确认（v4.15.17 收紧）。
         (flow / "进展.md").write_text(
             "## 2026-09-24 · 交接棒（SDD 蒸馏） · thread=" + UID + "\n- 现状：x\n",
             encoding="utf-8",
         )
         fallback = relay(root, root / "sessions", "无 ticket 场景")
         assert fallback.returncode == 0, (fallback.returncode, fallback.stderr)
-        assert "flow/tasks/<ticket>.md" in fallback.stdout, fallback.stdout[-800:]
+        assert "flow/tasks/<ticket>.md" not in fallback.stdout, fallback.stdout[-800:]
+        assert "未指定" in fallback.stdout or "活跃区" in fallback.stdout, fallback.stdout[-800:]
         assert str(root.resolve()) in fallback.stdout, fallback.stdout[-800:]
     print("PASS: relay prompt is self-contained; handoff size no longer blocks")
 

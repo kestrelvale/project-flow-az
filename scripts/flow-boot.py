@@ -1506,6 +1506,9 @@ def main() -> int:
                 *(["--thread-id", thread_id] if thread_id else []),
                 "--project",
                 str(project_root),
+                # 透传：外部心跳/夹具用自定义 sessions 根时，boot 的机检（接力提示词、看板）
+                # 也必须看向同一份 rollout，否则机检永远看不到真实回复。
+                *(["--sessions-root", str(args.sessions_root)] if args.sessions_root else []),
             ],
             text=True,
             capture_output=True,
@@ -1534,6 +1537,14 @@ def main() -> int:
     handoff_problems.extend(distill_problems)
     if guard_problem:
         handoff_problems.append(guard_problem)
+    if "上轮回复缺失任务看板" in budget_output:
+        # 用户反馈（2026-09-25）：「现在的所有会话都不给我汇报…也不给我打印这个任务看板」。
+        # 漏贴看板此前无机检；这条来自 flow-budget 的机检，放进路由阻塞，开工即点名。
+        handoff_problems.append(
+            "上一轮交付没有把收工看板贴进回复：回执落盘 ≠ 交付。本轮收工必须把"
+            "`flow-deliver.py` 输出的「任务状态看板 / 本轮工作汇报 / 交付验收卡」三段"
+            "原样复制到回复里；禁止只写摘要，禁止用 `| tail -N` 截掉三段。"
+        )
     if "上轮回复缺失接力提示词" in budget_output:
         # 用户反馈：「应该在对话框上打印出交接提示词再结束，而不是直接熔断」。
         # 这条来自 flow-budget 的机检；放到路由阻塞里，模型开工就被点名。

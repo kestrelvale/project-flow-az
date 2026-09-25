@@ -1,3 +1,44 @@
+## [4.15.17] - 2026-09-25 (接力指名对任务 + 看板/汇报必须真实可见)
+
+两条来自同一现场（zhengjie-hrm：主仓 13 张并行卡 + 3 个 worktree；用户反馈
+「现在的所有会话都不给我汇报，也不给我打印这个任务看板」）。
+
+### Fixed（接力提示词在多任务并行下指名错卡，`flow-budget.py`）
+- `handoff_prompt()` 不再从**顶部交接棒标题**猜 ticket —— 并行项目里顶部常常属于另一张卡，
+  猜错的代价是新会话去干别人的任务。改为：`--ticket` 显式指定 > 按 `--intent` 从
+  `flow/plan.md` 活跃区匹配 > 明确写「未指定」，**绝不编造**。
+- 卡存在性校验：卡不在 `<工作根>/flow/tasks/` 时照实说明「该卡不在活跃区（可能已归档）」，
+  并列出活跃区候选，不再输出指向不存在文件的死路径。
+- 提示词新增**并行队列快照**（活跃 `[ ]` 前 6 条）、`[!]` 阻塞项、`[-]` 待验收计数，
+  以及「主仓只做共享与合并窗口；分端在各自 worktree 施工」的分工声明。
+- 新增 CLI `--ticket` / `--work-root`；`flow-boot.py` 把 `--sessions-root` 透传给
+  `flow-budget.py`，外部心跳与夹具的机检才能看向同一份 rollout。
+
+### Fixed（看板自相矛盾 / 决策半截句 / 漏贴看板无机检，`flow-deliver.py`、`flow-budget.py`、`flow-boot.py`）
+- 归档分区不再把 plan.md 的占位文字原样带出：此前输出
+  `- 无（flow/history/tasks/ 已归档 82 张任务卡）`——前半句「无」、后半句 82 张，
+  用户直接读成「看板宕机了」。现在以磁盘为准：`- 已归档 N 张（flow/history/tasks/），最近：…`。
+- 决策分区改为按「条目 = 起始行 + 其缩进续行」聚合后再输出（`render_decisions()`），
+  不再把多行条目的续行当独立条目（此前出现半截 `- [⚡ 自动决策] 统一登录夹具：` 与
+  ``- `resolve_feedback`…``），单条超长统一截断到 240 字符并加 `…`。
+- **新增 `board_in_reply` 机检**：解析 rollout 的 `task_complete.last_agent_message`，
+  若项目已有交付回执而上一轮回复里没有看板，`flow-budget.py` 打印
+  「上轮回复缺失任务看板」，`flow-boot.py` 将其并入路由阻塞——漏贴看板从此会在下一轮开工被点名，
+  并明写「禁止只写摘要、禁止用 `| tail -N` 把三段截掉」。
+
+### Verification
+- `tests/run-all.sh` 全量 **21 项 Exit 0**。
+- 新增 `tests/test-report-visibility.py`（先红后绿）：①归档分区给真实计数与最近归档；
+  ②多行决策合并为完整条目、无半截续行；③漏贴看板被 flow-budget 打印并由 flow-boot 点名，
+  且**反向**（贴了看板的回复）不被点名。
+- 新增/转绿 `tests/test-relay-multi-task.py`：顶部 A 卡 + 意图指向 B 卡 → 指向 B 卡；
+  显式 `--ticket` 优先；已归档卡不给死路径；队列含并行卡与阻塞项；声明工作根与分工。
+- 既有契约同步：`tests/test-flow-deliver.py` 归档断言、`tests/test-relay-clarity.py`
+  的未指定 ticket 断言（占位符死路径 → 「未指定」+ 候选）均按新行为收紧。
+
+### Packaging
+- `VERSION` → `4.15.17`；项目侧 `flow/规范/VERSION` 由热同步接管，无需手工同步。
+
 ## [4.15.16] - 2026-09-24 (交接以「说清楚」为目的：撤掉字节上限，接力提示词自包含工作根与任务卡)
 
 两项来自同一现场（2026-09-24，thread `01a0d08b` 接手 `wt-p4` 的 P4 交接）：

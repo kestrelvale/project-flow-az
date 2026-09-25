@@ -47,6 +47,7 @@ STOP_TOOL_CALLS = 160
 # （最高累积 371 次工具调用），但 8 个会话里只有 1 个把接力提示词写进过回复，
 # 其余直接继续施工到会话结束——触发层正常，强制层缺失。
 BUDGET_DIR = "budget"
+DELIVERIES_DIR = "deliveries"
 # 检查点文件（覆盖式，不是时间戳堆积）：记录「上一次中段复查时的工具调用数」，
 # 供开工时判断复查节奏是否已经过期。与熔断回执分开——回执只由开工判定写。
 GUARD_FILE = "guard.json"
@@ -401,7 +402,22 @@ def last_visible_reply(paths: list[Path]) -> str:
 
 # 与 flow-boot.py 同款编号识别（P0-3 / P-FRONT-3 / W2-P4-… 都要认）。
 TICKET_IN_TITLE_RE = re.compile(r"([A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*-\d+)")
+PLAN_ITEM_RE = re.compile(r"^[-*]\s*\[([ xX\-!✕])]\s+(.+)$")
 RELAY_MARKERS = ("接力提示词", "flow-boot.py", "--intent")
+
+
+BOARD_MARKERS = ("任务状态看板", "当前聚焦待办")
+
+
+def board_visible(reply: str) -> bool:
+    """上一轮对外回复里有没有贴收工看板。
+
+    用户反馈（2026-09-25）：「现在的所有会话都不给我汇报，这个任务汇报做不做、
+    也不给我打印这个任务看板」。漏贴看板此前**没有任何机检**——`flow-boot.py` 只查
+    「查无交付回执」，回执有但回复没贴就无声无息。这里复用与接力提示词同一套观测量
+    （`task_complete.last_agent_message`），把「漏贴」变成下一轮开工能被点名的事实。
+    """
+    return bool(reply) and all(marker in reply for marker in BOARD_MARKERS)
 
 
 def relay_prompt_visible(reply: str) -> bool:
@@ -409,66 +425,159 @@ def relay_prompt_visible(reply: str) -> bool:
     return bool(reply) and all(marker in reply for marker in RELAY_MARKERS)
 
 
-def current_ticket(project: Path | None) -> str:
-    """从顶部交接棒标题里取 ticket（取不到返回空串）。
+def active_queue(project: Path | None) -> dict[str, list[str]]:
+    """读 plan.md 活跃区，按状态分组（多任务并行时提示词必须交代队列）。"""
+    queue: dict[str, list[str]] = {"todo": [], "blocked": [], "pending": []}
+    if project is None:
+        return queue
+    plan = Path(project) / "flow" / "plan.md"
+    if not plan.is_file():
+        return queue
+    bucket = {" ": "todo", "!": "blocked", "-": "pending"}
+    for line in plan.read_text(encoding="utf-8", errors="replace").splitlines():
+        stripped = line.strip()
+        if not stripped.startswith(("- ", "* ")):
+            continue
+        match = PLAN_ITEM_RE.match(stripped)
+        if not match:
+            continue
+        key = bucket.get(match.group(1))
+        if not key:
+            continue
+        queue[key].append(match.group(2).strip())
+    return queue
 
-    接力提示词必须点名**具体**任务卡：只写 `<ticket>` 占位符时，新会话得自己去
-    plan/claims/git worktree 里翻（2026-09-24 实测 thread 01a0d08b 翻了 75 次工具调用）。
+
+def resolve_ticket(project: Path | None, intent: str, explicit: str = "") -> tuple[str, bool]:
+    """定「本次要接的那张卡」。返回 (ticket, 卡是否存在)。
+
+    不再从顶部交接棒标题猜：并行项目里顶部常属于**另一张卡**，猜错的代价是新会话
+    去干别人的任务；顶部卡刚归档时更会给出**不存在的路径**（2026-09-24 实测）。
+    优先级：显式 --ticket > 活跃区里与 --intent 匹配的卡 > 空（不猜）。
     """
     if project is None:
-        return ""
-    progress = Path(project) / "flow" / "进展.md"
-    if not progress.is_file():
-        return ""
-    for line in progress.read_text(encoding="utf-8", errors="replace").splitlines():
-        if line.startswith(("## ", "### ")):
-            # 先砍掉 `thread=<uuid>` 段：UUID 尾部（a0c1cd-a264-7321-8779-8440…）会被
-            # 编号正则误当成 ticket，生成一条指向不存在任务卡的接力提示词
-            # （2026-09-24 实测：标题无 ticket 时提取出 `a0c1cd-a264-7321-8779-8440`）。
-            match = TICKET_IN_TITLE_RE.search(line.split("thread=")[0])
-            return match.group(1) if match else ""
-    return ""
+        return explicit, False
+    root = Path(project)
+    if explicit:
+        return explicit, (root / "flow" / "tasks" / f"{explicit}.md").is_file()
+    queue = active_queue(root)
+    # 先看活跃区条目里有没有直接出现 ticket，再看意图与条目文字的包含关系。
+    for item in queue["todo"] + queue["pending"] + queue["blocked"]:
+        match = TICKET_IN_TITLE_RE.search(item.split("thread=")[0])
+        if match and match.group(1) in intent:
+            return match.group(1), True
+    if intent:
+        for item in queue["todo"] + queue["pending"] + queue["blocked"]:
+            match = TICKET_IN_TITLE_RE.search(item.split("thread=")[0])
+            if match and text_overlap(intent, item):
+                return match.group(1), True
+    return "", False
 
 
-def handoff_prompt(intent: str, report: dict, project: Path | None = None) -> str:
-    root = str(Path(project).resolve()) if project is not None else "<工作根>"
-    ticket = current_ticket(project) or "<ticket>"
-    return "\n".join(
-        [
-            "继续执行 project-flow 任务。",
-            f"工作根：{root}",
-            "（若当前 cwd 不是这个工作根，先 `cd` 过去再执行下一条；不要在别的 checkout 上开工）",
-            "",
+def text_overlap(intent: str, item: str) -> bool:
+    """意图与条目是否有足够重叠（粗粒度，够用即可）。"""
+    tokens = [tok for tok in re.split(r"[\s，,。；;：:/|（）()\[\]【】]+", intent) if len(tok) >= 2]
+    return sum(1 for tok in tokens if tok in item) >= 1
+
+
+def handoff_prompt(
+    intent: str,
+    report: dict,
+    project: Path | None = None,
+    ticket: str = "",
+    work_root: str = "",
+) -> str:
+    """生成给新会话的接力提示词。
+
+    多任务/多工作区项目的硬要求（2026-09-25，zhengjie-hrm 主仓 13 张并行卡 + 3 个 worktree）：
+      - **显式交接身份**：ticket 由调用方给出或按 intent 从活跃区匹配，绝不从顶部交接棒标题猜
+        （顶部常属于另一张卡；那张卡刚归档时还会给出不存在的路径）；
+      - **卡存在性校验**：卡不在 <工作根>/flow/tasks/ 就照实说，并列出活跃区候选；
+      - **并行队列与阻塞项**：把活跃 [ ] 队列与 [!] 阻塞一并交代，新会话才知道自己在哪条线上；
+      - **分端/主仓分工**：写清工作根，并提示分端在 worktree、主仓只做共享合并。
+    """
+    root = str(Path(work_root).resolve()) if work_root else (
+        str(Path(project).resolve()) if project is not None else "<工作根>"
+    )
+    resolved, exists = resolve_ticket(project, intent, ticket)
+    queue = active_queue(project)
+    lines = [
+        "继续执行 project-flow 任务。",
+        f"工作根：{root}",
+        "（若当前 cwd 不是这个工作根，先 `cd` 过去再执行下一条；不要在别的 checkout 上开工）",
+        "",
+    ]
+    if resolved and exists:
+        lines += [
+            f"本次交接身份：{resolved}",
             "请先按硬首动运行：",
             f'python3 ~/.codex/skills/project-flow-az/scripts/flow-boot.py . --intent "{intent}"',
             "",
             "然后只读取（都在上面的工作根下）：",
             f"- {root}/flow/plan.md 当前聚焦 [ ]/[✕]",
             f"- {root}/flow/进展.md 顶部一条",
-            f"- 本次任务卡：{root}/flow/tasks/{ticket}.md",
-            f"- 规格点台账：{root}/flow/specs/{ticket}.md（只做状态不是 [x] 的规格点）",
+            f"- 本次任务卡：{root}/flow/tasks/{resolved}.md",
+            f"- 规格点台账：{root}/flow/specs/{resolved}.md（只做状态不是 [x] 的规格点）",
             f"- 与当前任务类型匹配的 {root}/flow/规范/*.md",
-            "",
-            "只做上面这条任务卡对应的未回收规格点；不要遍历其它任务卡、其它工作区或历史归档。",
-            "",
-            "上一会话已触发预算熔断：",
-            f"- 单次输入: {report['input_tokens']} tokens",
-            f"- 缓存命中: {report['cache_ratio']:.1%}",
-            f"- 上下文占用: {report['context_ratio']:.1%}",
-            f"- 轮次: {report['rounds']}，工具调用: {report['tool_calls']}",
-            "",
-            "请以磁盘真实状态为唯一真相源，继续下一张活跃任务卡；不要复读历史聊天，不要读取 history/ 或 trash/，完成后写入 flow/进展.md 顶部交接棒。",
-            "",
-            "本会话收尾必须先落盘 SDD 蒸馏交接棒 + 规格点台账，结构如下：",
-            "",
-            HANDOFF_TEMPLATE,
-            "",
-            SPEC_LEDGER_TEMPLATE,
-            "",
-            "硬规则：交接棒与汇报只写「规格点 / 待办 / 证据 / 下一步」，"
-            "禁止把用户消息原样贴进来——原样摘抄既不是需求点也不是规格点，只会让新会话重读全部历史。",
         ]
-    )
+    elif resolved:
+        lines += [
+            f"本次交接身份：{resolved}（**该卡不在活跃区**：{root}/flow/tasks/{resolved}.md 不存在，"
+            "可能已归档——请勿按这张卡施工）",
+            "请先按硬首动运行：",
+            f'python3 ~/.codex/skills/project-flow-az/scripts/flow-boot.py . --intent "{intent}"',
+            "",
+            "然后从下面的活跃区候选里选一张（或按用户本轮指令指定）：",
+        ]
+    else:
+        lines += [
+            "本次交接身份：未指定（未从 --ticket 或活跃区匹配到卡，请勿凭顶部交接棒猜）",
+            "请先按硬首动运行：",
+            f'python3 ~/.codex/skills/project-flow-az/scripts/flow-boot.py . --intent "{intent}"',
+            "",
+            f"然后只读取（都在上面的工作根下）：{root}/flow/plan.md 与 {root}/flow/进展.md 顶部一条，",
+            "再从下面的活跃区候选里确认本次要做的那张卡：",
+        ]
+    if not (resolved and exists):
+        for item in queue["todo"][:6]:
+            lines.append(f"- [ ] {item[:110]}")
+        if not queue["todo"]:
+            lines.append("- 活跃区为空：请先按 SDD 在 flow/plan.md 登记原子任务")
+
+    if queue["todo"]:
+        lines += ["", f"并行队列（本工作根 plan.md 活跃 [ ]，共 {len(queue['todo'])} 张）："]
+        lines += [f"- {item[:110]}" for item in queue["todo"][:6]]
+    if queue["blocked"]:
+        lines += ["", "阻塞项（[!]，不要撞）："]
+        lines += [f"- {item[:110]}" for item in queue["blocked"][:4]]
+    if queue["pending"]:
+        lines += ["", f"另有 {len(queue['pending'])} 张 [-] 待人工验收：不要重跑。"]
+
+    lines += [
+        "",
+        "分工边界：主仓只做共享文件与合并窗口；分端在各自 worktree 施工，"
+        "不要在没有共享锁的情况下改 pages.json / 共享 api 客户端。",
+        "",
+        "只做上面这条任务卡对应的未回收规格点；不要遍历其它任务卡、其它工作区或历史归档。",
+        "",
+        "上一会话已触发预算熔断：",
+        f"- 单次输入: {report['input_tokens']} tokens",
+        f"- 缓存命中: {report['cache_ratio']:.1%}",
+        f"- 上下文占用: {report['context_ratio']:.1%}",
+        f"- 轮次: {report['rounds']}，工具调用: {report['tool_calls']}",
+        "",
+        "请以磁盘真实状态为唯一真相源，继续下一张活跃任务卡；不要复读历史聊天，不要读取 history/ 或 trash/，完成后写入 flow/进展.md 顶部交接棒。",
+        "",
+        "本会话收尾必须先落盘 SDD 蒸馏交接棒 + 规格点台账，结构如下：",
+            "",
+        HANDOFF_TEMPLATE,
+        "",
+        SPEC_LEDGER_TEMPLATE,
+            "",
+        "硬规则：交接棒与汇报只写「规格点 / 待办 / 证据 / 下一步」，"
+        "禁止把用户消息原样贴进来——原样摘抄既不是需求点也不是规格点，只会让新会话重读全部历史。",
+    ]
+    return "\n".join(lines)
 
 
 def main() -> int:
@@ -483,6 +592,12 @@ def main() -> int:
         ),
     )
     parser.add_argument("--project", default=".", help="项目根目录（写熔断回执用）")
+    parser.add_argument(
+        "--ticket",
+        default="",
+        help="本次交接的任务编号（显式交接身份；不传则按 --intent 从活跃区匹配，绝不从顶部交接棒猜）",
+    )
+    parser.add_argument("--work-root", default="", help="工作根绝对路径（分端 worktree 场景必须显式给出）")
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
         "--guard",
@@ -528,6 +643,8 @@ def main() -> int:
                     args.intent or DEFAULT_INTENT,
                     summarize_thread(sessions_for_prompt),
                     Path(args.project),
+                    ticket=args.ticket,
+                    work_root=args.work_root,
                 )
                 print("project-flow 接力提示词（复制给新会话）")
                 print(stored)
@@ -554,8 +671,16 @@ def main() -> int:
     report = summarize_thread(sessions)
     report["session_file"] = str(sessions[0])
     # 第 3 点：提示词是否已出现在那一轮的对外回复里。放进报告，外部心跳才能体检。
-    report["relay_prompt_in_reply"] = relay_prompt_visible(last_visible_reply(sessions))
-    prompt = handoff_prompt(args.intent or DEFAULT_INTENT, report, Path(args.project))
+    reply = last_visible_reply(sessions)
+    report["relay_prompt_in_reply"] = relay_prompt_visible(reply)
+    report["board_in_reply"] = board_visible(reply)
+    prompt = handoff_prompt(
+        args.intent or DEFAULT_INTENT,
+        report,
+        Path(args.project),
+        ticket=args.ticket,
+        work_root=args.work_root,
+    )
     if args.print_relay:
         # 「要求交接却没有交接提示词」的正面修复：无论当前会话判级如何，
         # 先把要交给新会话的那段话原样打出来。
@@ -646,6 +771,16 @@ def main() -> int:
             print("- 以下整段必须原样复制进你的回复，再结束本轮；只写「已熔断」不算交接。")
         print("\nproject-flow 接力提示词")
         print(prompt)
+    # 只要项目里有交付回执，上一轮的对外回复就必须贴出看板（三段契约之一）。
+    # 没有回执时不判——还没交付过，谈不上漏贴。
+    deliveries_dir = Path(args.project) / "flow" / DELIVERIES_DIR
+    has_delivery = deliveries_dir.is_dir() and any(deliveries_dir.glob("*.json"))
+    if has_delivery and not report.get("board_in_reply"):
+        print("\nproject-flow 上轮回复缺失任务看板（本轮必须把三段原样贴出）")
+        print("- 判据：task_complete.last_agent_message 里必须同时出现「任务状态看板」与"
+              "「当前聚焦待办」；只有回执落盘、回复里没贴，等于没交付。")
+        print("- 收工时把 `flow-deliver.py` 输出的「任务状态看板 / 本轮工作汇报 / 交付验收卡」"
+              "三段**原样**复制进回复；禁止只写摘要，禁止用 `| tail -N` 把三段截掉。")
     if report["level"] == "STOP":
         print("\nproject-flow 柔性阻塞：本轮只允许「交接落盘」，禁止登记新意图与业务施工")
         print("- 必须落盘：flow/进展.md 顶部 SDD 蒸馏交接棒 + flow/specs/<ticket>.md 规格点台账")

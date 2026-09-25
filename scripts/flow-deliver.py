@@ -215,30 +215,65 @@ def render_plan_sections(plan: Path) -> str:
         if matched:
             lines.extend(matched)
         elif states == ("✓",):
+            # 旧实现把 plan.md 的占位文字原样带出，于是看板出现「- 无（…已归档 82 张）」
+            # 这种自相矛盾（2026-09-25 实测，用户读到「看板宕机了」）。
+            # 归档事实以磁盘为准：列真实计数与最近 3 张。
             archived = plan.parent / "history" / "tasks"
-            count = len(list(archived.glob("*.md"))) if archived.is_dir() else 0
-            lines.append(f"- 无（flow/history/tasks/ 已归档 {count} 张任务卡）")
+            cards = sorted(archived.glob("*.md")) if archived.is_dir() else []
+            if cards:
+                recent = "、".join(card.stem for card in cards[-3:])
+                lines.append(f"- 已归档 {len(cards)} 张（flow/history/tasks/），最近：{recent}")
+            else:
+                lines.append("- 无")
         else:
             lines.append("- 无")
         lines.append("")
 
     lines.append("## 💡 本轮决策记录 (Decisions)")
-    decisions = plan.parent / "decisions.md"
-    recorded: list[str] = []
-    if decisions.is_file():
-        for line in decisions.read_text(encoding="utf-8", errors="replace").splitlines():
-            stripped = line.strip()
-            if not stripped.startswith(("- ", "* ")):
-                continue
-            # decisions.md 是累计流水，含“背景/影响范围”等章节结构噪音；
-            # 看板只收带决策标签的真实条目。
-            if any(marker in stripped for marker in DECISION_MARKERS):
-                recorded.append(stripped)
-    if recorded:
-        lines.extend(recorded[-3:])
-    else:
-        lines.append("- 无")
+    lines.extend(render_decisions(plan.parent / "decisions.md"))
     return "\n".join(lines).rstrip()
+
+
+# 单条决策超长时截到这里；决策流水里存在整段贴入 memo 的条目。
+MAX_DECISION_CHARS = 240
+
+
+def render_decisions(decisions: Path) -> list[str]:
+    """只输出**完整**决策条目（最后 3 条）。
+
+    旧实现逐行过滤，把多行条目的续行也当成独立条目输出，于是看板出现半截
+    `- [⚡ 自动决策] 统一登录夹具：` 和 ``- `resolve_feedback`…`` 这种残句
+    （2026-09-25 实测，用户读到「汇报看板宕机」）。这里按「条目 = 起始行 + 其缩进续行」
+    聚合，再压成一行；只保留带决策标签的条目。
+    """
+    if not decisions.is_file():
+        return ["- 无"]
+    entries: list[str] = []
+    current: list[str] = []
+    for line in decisions.read_text(encoding="utf-8", errors="replace").splitlines():
+        stripped = line.strip()
+        if stripped.startswith(("- ", "* ")):
+            if current:
+                entries.append(" ".join(current))
+            current = [stripped]
+        elif current and (line.startswith((" ", "\t")) or stripped):
+            # 续行（缩进或同段落的普通文本）并入当前条目，不单独成条
+            current.append(stripped)
+        elif current:
+            entries.append(" ".join(current))
+            current = []
+    if current:
+        entries.append(" ".join(current))
+    recorded = [entry for entry in entries if any(marker in entry for marker in DECISION_MARKERS)]
+    if not recorded:
+        return ["- 无"]
+    out: list[str] = []
+    for entry in recorded[-3:]:
+        entry = " ".join(entry.split())
+        if len(entry) > MAX_DECISION_CHARS:
+            entry = entry[:MAX_DECISION_CHARS].rstrip() + "…"
+        out.append(entry)
+    return out
 
 
 def main() -> int:
