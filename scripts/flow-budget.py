@@ -403,6 +403,12 @@ def last_visible_reply(paths: list[Path]) -> str:
 # 与 flow-boot.py 同款编号识别（P0-3 / P-FRONT-3 / W2-P4-… 都要认）。
 TICKET_IN_TITLE_RE = re.compile(r"([A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*-\d+)")
 PLAN_ITEM_RE = re.compile(r"^[-*]\s*\[([ xX\-!✕])]\s+(.+)$")
+# 台账行：`- [state] SPE-n | 规格点 | 证据：…`（与 flow-gate/flow-distill 同款口径）。
+SPEC_LINE_RE = re.compile(r"^\s*[-*]\s*\[([ x\-!])]\s*(SPE-\d+)\s*\|\s*(.*?)\s*\|")
+# 与 flow-boot.py 同款：只认完整 UUID，避免把截断的 `thread=01a0cd2e-` 当来源。
+HANDOFF_THREAD_RE = re.compile(
+    r"thread=([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+)
 RELAY_MARKERS = ("接力提示词", "flow-boot.py", "--intent")
 
 
@@ -471,7 +477,99 @@ def resolve_ticket(project: Path | None, intent: str, explicit: str = "") -> tup
             match = TICKET_IN_TITLE_RE.search(item.split("thread=")[0])
             if match and text_overlap(intent, item):
                 return match.group(1), True
+    # 意图里**显式点名**了某个编号时，就只用它：哪怕它已归档，也只照实说「该卡不在活跃区」，
+    # 绝不用别的卡兜底（2026-09-25 实测：新手会因此被带到另一张卡上开工）。
+    if intent:
+        explicit_hits = TICKET_IN_TITLE_RE.findall(intent.split("thread=")[0])
+        for hit in explicit_hits:
+            if any(hit in item for item in queue["todo"] + queue["pending"] + queue["blocked"]):
+                return hit, True
+        if explicit_hits:
+            return explicit_hits[0], False
+    # 收工交接的主战场：卡已转入 `[-]` 待验收、活跃区清空。此时仍必须能认出它
+    # （2026-09-25 实测：只看活跃区 → 提示词永远写「未指定」，用户读成「没交接清楚」）。
+    pending = queue["pending"]
+    if intent:
+        for item in pending:
+            match = TICKET_IN_TITLE_RE.search(item.split("thread=")[0])
+            if match and text_overlap(intent, item):
+                return match.group(1), True
+    if len(pending) == 1:
+        match = TICKET_IN_TITLE_RE.search(pending[0].split("thread=")[0])
+        if match:
+            return match.group(1), True
     return "", False
+
+
+def _card_field(project: Path | None, ticket: str, *names: str) -> str:
+    """从任务卡里取字段（goal/objective/acceptance 等）。"""
+    if project is None or not ticket:
+        return ""
+    card = Path(project) / "flow" / "tasks" / f"{ticket}.md"
+    if not card.is_file():
+        return ""
+    values: dict[str, str] = {}
+    for line in card.read_text(encoding="utf-8", errors="replace").splitlines():
+        if ":" in line:
+            key, _, value = line.partition(":")
+            values[key.strip().lower()] = value.strip()
+    for name in names:
+        if values.get(name):
+            return values[name]
+    return ""
+
+
+def card_objective(project: Path | None, ticket: str) -> str:
+    return _card_field(project, ticket, "goal", "objective")
+
+
+def acceptance_of(project: Path | None, ticket: str) -> str:
+    return _card_field(project, ticket, "acceptance")
+
+
+def handoff_fields(project: Path | None) -> dict[str, str]:
+    """顶部交接棒的结构化字段 + 来源会话 + 标题（接力提示词的「交接来源/任务说明/下一步」来源）。"""
+    info = {"title": "", "thread": "", "现状": "", "还剩": "", "卡在哪": "", "下一步": "", "台账": ""}
+    if project is None:
+        return info
+    progress = Path(project) / "flow" / "进展.md"
+    if not progress.is_file():
+        return info
+    lines = progress.read_text(encoding="utf-8", errors="replace").splitlines()
+    start = next((i for i, line in enumerate(lines) if line.startswith(("## ", "### "))), None)
+    if start is None:
+        return info
+    info["title"] = lines[start].strip()
+    match = HANDOFF_THREAD_RE.search(lines[start])
+    if match:
+        info["thread"] = match.group(1).lower()
+    for line in lines[start + 1:]:
+        if line.startswith(("## ", "### ")):
+            break
+        stripped = line.strip().lstrip("-* ").strip()
+        for field in ("来源会话", "现状", "还剩", "卡在哪", "下一步", "台账"):
+            if stripped.startswith(f"{field}：") or stripped.startswith(f"{field}:"):
+                info[field] = stripped.split("：", 1)[-1].split(":", 1)[-1].strip()
+        if not info["thread"]:
+            match = HANDOFF_THREAD_RE.search(line)
+            if match:
+                info["thread"] = match.group(1).lower()
+    return info
+
+
+def pending_specs(project: Path | None, ticket: str) -> list[str]:
+    """台账里还没回收的规格点编号（提示词必须让新会话知道还剩多少）。"""
+    if project is None or not ticket:
+        return []
+    ledger = Path(project) / "flow" / "specs" / f"{ticket}.md"
+    if not ledger.is_file():
+        return []
+    pending: list[str] = []
+    for line in ledger.read_text(encoding="utf-8", errors="replace").splitlines():
+        match = SPEC_LINE_RE.match(line)
+        if match and match.group(1) != "x":
+            pending.append(f"{match.group(2)} {match.group(3)}".strip())
+    return pending
 
 
 def text_overlap(intent: str, item: str) -> bool:
@@ -507,9 +605,33 @@ def handoff_prompt(
         "（若当前 cwd 不是这个工作根，先 `cd` 过去再执行下一条；不要在别的 checkout 上开工）",
         "",
     ]
+    fields = handoff_fields(project)
+    source_thread = fields["thread"] or (str(report.get("thread_id") or "").strip())
+    pending = pending_specs(project, resolved)
     if resolved and exists:
         lines += [
-            f"本次交接身份：{resolved}",
+            "—— 交接来源 ——",
+            f"来源会话：thread={source_thread or '（未声明）'}",
+            f"来源任务卡：{resolved}",
+            f"来源交接棒：{fields['title'] or '（进展.md 顶部无交接棒）'}",
+            f"台账：{root}/flow/specs/{resolved}.md（未回收 {len(pending)} 条）",
+            "",
+            "—— 任务说明 ——",
+            f"- 这是什么：{card_objective(project, resolved) or '（任务卡缺 objective）'}",
+            f"- 当前状态：{fields['现状'] or '（交接棒未写「现状」）'}",
+            f"- 还剩：{fields['还剩'] or '（交接棒未写「还剩」）'}",
+            f"- 卡在哪：{fields['卡在哪'] or '（交接棒未写「卡在哪」）'}",
+            "",
+            "—— 下一步 ——",
+            f"- 第一件事：{fields['下一步'] or '按台账未回收项继续'}",
+            f"- 验收标准：{acceptance_of(project, resolved) or '（任务卡缺 acceptance）'}",
+        ]
+        if pending:
+            lines.append("- 未回收规格点（只做这些）：" + "；".join(pending[:5]))
+        else:
+            lines.append("- 未回收规格点：无（台账已全绿）；如无新指令，本卡只剩人工验收")
+        lines += [
+            "",
             "请先按硬首动运行：",
             f'python3 ~/.codex/skills/project-flow-az/scripts/flow-boot.py . --intent "{intent}"',
             "",
@@ -522,8 +644,8 @@ def handoff_prompt(
         ]
     elif resolved:
         lines += [
-            f"本次交接身份：{resolved}（**该卡不在活跃区**：{root}/flow/tasks/{resolved}.md 不存在，"
-            "可能已归档——请勿按这张卡施工）",
+            # 不写字面路径：契约要求「已归档/不存在的卡不得给出死路径」（见 test-relay-multi-task）。
+            f"本次交接身份：{resolved}（**该卡不在活跃区**，可能已归档——请勿按这张卡施工）",
             "请先按硬首动运行：",
             f'python3 ~/.codex/skills/project-flow-az/scripts/flow-boot.py . --intent "{intent}"',
             "",

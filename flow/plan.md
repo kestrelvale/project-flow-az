@@ -5,9 +5,15 @@
 
 ## 🎯 当前聚焦待办 (P0)
 
-- 无（本轮无活跃卡；两张卡已交付，见下方待验收区）
-
 ## ⏳ 待人工验收 (Pending Verification)
+
+- [-] PFP-RELAY-IDENTITY-20260925 [P0] 等人工验收： 接力提示词缺交接身份与下一步：
+  ① 必须写明来源会话 thread id、来源任务卡、来源交接棒标题（用户「原始的会话 ID 都没有放上去」）；
+  ② 必须一句话说清「这是什么任务、当前状态」（用户「也没有写清楚这个到底是什么」）；
+  ③ 必须写明新会话第一步做什么、验收标准是什么、还剩哪些未回收规格点（用户「下一步需要新会话去交接什么东西」）；
+  ④ 修回归：卡转入 `[-]` 待验收后活跃区清空 → ticket 解析恒为「未指定」。
+  写入边界：`scripts/flow-budget.py`、`tests/test-relay-identity.py`。
+  验证：`python3 tests/test-relay-identity.py` + `bash tests/run-all.sh`。
 
 - [-] PFP-REPORT-VISIBILITY-20260925 [P0] 等人工验收： 看板/汇报要么不打印、要么被截断或自相矛盾：（v4.15.17）
   ① flow-deliver 归档分区在 plan 占位「无」而 history 有卡时输出「无」；
