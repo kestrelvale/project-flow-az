@@ -176,6 +176,43 @@ def main() -> None:
         assert CARD_B in text and CARD_C in text, text[-1500:]
         assert "[!]" in text or "阻塞" in text, text[-1500:]
         assert "worktree" in text or "工作根" in text, text[-1500:]
+
+        # 打回 SPE-5（IDENTITY）：顶部交接棒是 A 卡、意图指向 B 卡时，
+        # 「来源交接棒」与「现状/还剩/卡在哪」必须全部来自 B 卡——不得把 A 卡的现状贴给 B 卡。
+        # 修复前：来源交接棒 = A 卡标题，现状 = 「调度中」，新会话拿着 B 卡读 A 卡的交接。
+        assert f"来源任务卡：{CARD_B}" in text, text[-1500:]
+        handoff_line = next(
+            (ln for ln in text.splitlines() if ln.startswith("来源交接棒：")), ""
+        )
+        assert CARD_A not in handoff_line, (
+            "来源交接棒贴了顶部那张卡（A）而不是本次要接的卡（B）：" + handoff_line
+        )
+
+        # 打回 SPE-6（IDENTITY）：目标卡在进展.md 里没有交接棒时，照实说「未声明」，
+        # 不得退化成贴另一张卡的内容。
+        no_handoff_text = relay(root, f"{CARD_C} 企业移动端收尾").stdout
+        line = next(
+            (ln for ln in no_handoff_text.splitlines() if ln.startswith("来源交接棒：")), ""
+        )
+        assert CARD_A not in line, "目标卡无交接棒时贴了他卡内容：" + line
+        assert "未声明" in line or CARD_C in line, line
+
+        # 打回 SPE-5（MULTITASK）：意图显式点名 B，B 不在活跃区，而活跃区 A 卡条目文字引用了 B 编号
+        # → 必须返回 B（照实说不存在），绝不被 A 兜底。
+        # 修复前：resolve_ticket 的「子串包含」先命中 A 并直接 return。
+        plan = flow / "plan.md"
+        raw = plan.read_text(encoding="utf-8")
+        raw = raw.replace(
+            f"- [ ] {CARD_B} [P0] 求职者 H5 25 行矩阵收口",
+            f"- [ ] {CARD_A} [P0] 总控：并行调度（等 {CARD_B} 的成果合入）",
+        )
+        plan.write_text(raw, encoding="utf-8")
+        shadowed = relay(root, f"接力 {CARD_B}：继续 H5 矩阵")
+        assert f"flow/tasks/{CARD_A}.md" not in shadowed.stdout, (
+            "意图点名 B 却被引用了 B 编号的 A 卡兜底：" + shadowed.stdout[-1200:]
+        )
+        assert CARD_B in shadowed.stdout, shadowed.stdout[-1200:]
+
     print("PASS: relay prompt names the right card and shows the parallel queue")
 
 

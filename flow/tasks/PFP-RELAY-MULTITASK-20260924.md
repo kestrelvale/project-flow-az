@@ -4,16 +4,16 @@ objective: 接力提示词在多任务并行/多工作区下指名正确任务�
 mode: execute
 method: SDD,TDD,ATDD,BDD
 scope: |
-  输入：flow/plan.md 活跃区（[ ]/[-]/[!]）；可选显式 --ticket / --work-root；flow/budget/*-stop.json
-  输出：接力提示词显式带 work_root + ticket + 活跃队列表；ticket 卡不存在时标注并从活跃区列候选；
-        无显式 ticket 时按 --intent 匹配活跃卡，匹配不到就说「未指定」而不是编造
-  边界：不改软阻塞/核销语义；不自动跨工作区执行；不读取 history/ 候选
+  输入：--intent（可能显式点名某编号）、flow/plan.md 活跃区条目（条目文字可能引用别的卡编号）
+  输出：意图中显式点名的编号拥有最高优先级——活跃区有它就用它；活跃区没有它就照实说「不在活跃区」，
+        绝不被子串包含该编号的**其它**卡兜底
+  边界：不改显式 --ticket 最高优先级；不改文字匹配作为无显式点名时的回退；不改软阻塞/核销语义
 write_whitelist: scripts/flow-budget.py,tests/test-relay-multi-task.py,CHANGELOG.md,VERSION
 depends_on: 无
 red_test: tests/test-relay-multi-task.py
 verify_command: python3 tests/test-relay-multi-task.py
-acceptance: Given 顶部交接棒是 A 卡而本轮意图是 B 卡，When 生成接力提示词，Then 指向 B 卡；Given 卡已归档，Then 不给出不存在的卡路径而是列活跃区候选
-evidence: tests/run-all.sh 21 项 Exit 0
+acceptance: Given 意图点名 B 卡、B 不在活跃区，而活跃区 A 卡条目文字含 B 编号，When 解析 ticket，Then 返回 B（照实说不存在）而非 A；Given 意图未点名任何编号，Then 才回退文字匹配
+evidence: tests/test-relay-multi-task.py 打回断言③ + tests/run-all.sh 22 项 Exit 0（v4.15.19）
 next_agent: 人工验收
-next_action: 人工验收后移入 flow/history/tasks/
+next_action: 已修复，「点名 B 却返回 A」，再把显式点名块上移到匹配循环之前
 spec_ledger: flow/specs/PFP-RELAY-MULTITASK-20260924.md

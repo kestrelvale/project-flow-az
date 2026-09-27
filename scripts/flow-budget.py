@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -47,6 +48,30 @@ STOP_TOOL_CALLS = 160
 # （最高累积 371 次工具调用），但 8 个会话里只有 1 个把接力提示词写进过回复，
 # 其余直接继续施工到会话结束——触发层正常，强制层缺失。
 BUDGET_DIR = "budget"
+
+
+def board_section_keys() -> tuple[str, ...]:
+    """看板的四个分区标题，**从 `flow-deliver.py` 派生**（单一真相源）。
+
+    绝不在本文件另抄一份 emoji：两处一旦漂移，`flow-deliver` 改了标题而这里没跟，
+    机检就会把**所有**真看板判成「没贴」——比漏报严重得多。
+    """
+    card = Path(__file__).resolve().parent / "flow-deliver.py"
+    try:
+        spec = importlib.util.spec_from_file_location("flow_deliver_contract", card)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        # 取完整标题（含 emoji 与括号说明），只截到标题行本身。
+        # 切早了会退化成 `## `，等于「任意四个二级标题」就算贴了看板——比不校验更糟。
+        keys = [head.strip() for head, _ in module.BOARD_SECTIONS]
+        keys.append("## 💡 本轮决策记录 (Decisions)")
+        return tuple(keys)
+    except Exception:
+        # 派生失败不能变成「全线误报」：退回宽判，宁可漏报也不冤枉。
+        return ()
+
+
+BOARD_SECTION_KEYS = board_section_keys()
 DELIVERIES_DIR = "deliveries"
 # 检查点文件（覆盖式，不是时间戳堆积）：记录「上一次中段复查时的工具调用数」，
 # 供开工时判断复查节奏是否已经过期。与熔断回执分开——回执只由开工判定写。
@@ -374,14 +399,75 @@ def summarize_thread(paths: list[Path]) -> dict:
     return aggregate
 
 
+# 模型的内部元数据块：`<analysis>` 是推理草稿，`<summary>` 按时间回放整段对话
+# （「**用户消息 4**: …」这类文本就来自这里）。它们**不是**用户可见的回复。
+MODEL_SCRATCH_RE = re.compile(
+    r"<(analysis|summary|thinking|tool_command)>.*?</\1>", re.DOTALL | re.IGNORECASE
+)
+
+
+def strip_model_scratch(text: str) -> str:
+    """剥掉模型内部元数据，只留用户真正看得到的正文。
+
+    用户反馈（2026-09-26）：「所有的用户消息又出现了，整那么多这个东西有什么用呢」
+    ——那不是模型在回复里复述，而是 `<summary>` 回放对话被当成了对外回复。
+    """
+    if not text:
+        return ""
+    # 先成对剥离；再清掉没有闭合标签的残留开块（截断的草稿会被截在中间）。
+    out = MODEL_SCRATCH_RE.sub("", text)
+    out = re.sub(
+        r"<(analysis|summary|thinking|tool_command)>.*\Z",
+        "", out, flags=re.DOTALL | re.IGNORECASE,
+    )
+    return out.strip()
+
+
+def _read_last_assistant_message(path: Path) -> str:
+    """读该会话最后一条 `role=="assistant"` 的正文（真正的对外回复）。"""
+    last = ""
+    try:
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                if '"assistant"' not in line:
+                    continue
+                try:
+                    item = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if item.get("type") != "response_item":
+                    continue
+                payload = item.get("payload") or {}
+                if payload.get("type") != "message" or payload.get("role") != "assistant":
+                    continue
+                text = "".join(
+                    part.get("text", "")
+                    for part in payload.get("content") or []
+                    if isinstance(part, dict)
+                )
+                if strip_model_scratch(text):
+                    last = text
+    except OSError:
+        return ""
+    return last
+
+
 def last_visible_reply(paths: list[Path]) -> str:
     """取该 thread 最后一轮**用户可见的回复**。
 
-    `task_complete.last_agent_message` 就是那一轮的对外回复，是判断
-    「熔断提示词有没有真的贴给用户看」的唯一可靠依据。
+    优先用 `response_item` 里最后一条 `role=="assistant"` 的正文；取不到才退回
+    `task_complete.last_agent_message`，并且**一律先剥掉模型草稿**。
+
+    为什么不再信 `last_agent_message`：实测（2026-09-26）它常装的是模型的原始产出，
+    `<analysis>`/`<summary>` 占满全文（总控会话 17,166~33,805 字符全是草稿）。
+    拿它当观测量会同时造成两个错误：冤枉模型「没贴看板」，且把回放用户消息的
+    `<summary>` 误当成"对外回复里出现了用户消息"。
     """
-    for path in paths:  # 新→旧，取最新那个文件的最后一条即可
-        last = ""
+    fallback = ""
+    for path in paths:  # 新→旧，取最新那个文件即可
+        text = _read_last_assistant_message(path)
+        if text:
+            return strip_model_scratch(text)
         try:
             with path.open(encoding="utf-8", errors="replace") as handle:
                 for line in handle:
@@ -392,12 +478,12 @@ def last_visible_reply(paths: list[Path]) -> str:
                     except json.JSONDecodeError:
                         continue
                     if payload.get("type") == "task_complete":
-                        last = str(payload.get("last_agent_message") or "") or last
+                        fallback = str(payload.get("last_agent_message") or "") or fallback
         except OSError:
             continue
-        if last:
-            return last
-    return ""
+        if fallback:
+            break
+    return strip_model_scratch(fallback)
 
 
 # 与 flow-boot.py 同款编号识别（P0-3 / P-FRONT-3 / W2-P4-… 都要认）。
@@ -412,7 +498,6 @@ HANDOFF_THREAD_RE = re.compile(
 RELAY_MARKERS = ("接力提示词", "flow-boot.py", "--intent")
 
 
-BOARD_MARKERS = ("任务状态看板", "当前聚焦待办")
 
 
 def board_visible(reply: str) -> bool:
@@ -421,9 +506,23 @@ def board_visible(reply: str) -> bool:
     用户反馈（2026-09-25）：「现在的所有会话都不给我汇报，这个任务汇报做不做、
     也不给我打印这个任务看板」。漏贴看板此前**没有任何机检**——`flow-boot.py` 只查
     「查无交付回执」，回执有但回复没贴就无声无息。这里复用与接力提示词同一套观测量
-    （`task_complete.last_agent_message`），把「漏贴」变成下一轮开工能被点名的事实。
+    （`last_visible_reply`），把「漏贴」变成下一轮开工能被点名的事实。
+
+    判据必须是看板**四分区标题行**（`BOARD_SECTION_KEYS`，从 `flow-deliver.py` 派生），
+    不能是「任务状态看板」「当前聚焦待办」这种在解释性文字里也会出现的词。
+    实测（2026-09-26）：两个词的 `in` 判断下，5 段非看板文本有 3 段被误判为「已贴」，
+    包括「本轮我确保会输出『任务状态看板』与『当前聚焦待办』」这种**空承诺**，
+    以及引用规则原文——而那段原文本身就印在 `flow-budget` 自己的输出里。
     """
-    return bool(reply) and all(marker in reply for marker in BOARD_MARKERS)
+    if not reply:
+        return False
+    if not BOARD_SECTION_KEYS:
+        # 契约派生失败：宁可漏报，不可全线误报。
+        return False
+    lines = reply.splitlines()
+    return all(
+        any(line.startswith(key) for line in lines) for key in BOARD_SECTION_KEYS
+    )
 
 
 def relay_prompt_visible(reply: str) -> bool:
@@ -467,25 +566,25 @@ def resolve_ticket(project: Path | None, intent: str, explicit: str = "") -> tup
     if explicit:
         return explicit, (root / "flow" / "tasks" / f"{explicit}.md").is_file()
     queue = active_queue(root)
-    # 先看活跃区条目里有没有直接出现 ticket，再看意图与条目文字的包含关系。
-    for item in queue["todo"] + queue["pending"] + queue["blocked"]:
-        match = TICKET_IN_TITLE_RE.search(item.split("thread=")[0])
-        if match and match.group(1) in intent:
-            return match.group(1), True
-    if intent:
-        for item in queue["todo"] + queue["pending"] + queue["blocked"]:
-            match = TICKET_IN_TITLE_RE.search(item.split("thread=")[0])
-            if match and text_overlap(intent, item):
-                return match.group(1), True
-    # 意图里**显式点名**了某个编号时，就只用它：哪怕它已归档，也只照实说「该卡不在活跃区」，
-    # 绝不用别的卡兜底（2026-09-25 实测：新手会因此被带到另一张卡上开工）。
+    items = queue["todo"] + queue["pending"] + queue["blocked"]
+    # 意图里**显式点名**了某个编号时，就只用它——这一步必须在文字匹配**之前**：
+    # 活跃区条目常引用别的卡编号（「等 PFP-XXX 的成果合入」），先跑文字匹配就会把
+    # 被引用的那张卡误认成本次要接的卡（2026-09-25 实测：点名 B 却返回 A）。
+    # 哪怕它已归档，也只照实说「该卡不在活跃区」，绝不用别的卡兜底。
     if intent:
         explicit_hits = TICKET_IN_TITLE_RE.findall(intent.split("thread=")[0])
         for hit in explicit_hits:
-            if any(hit in item for item in queue["todo"] + queue["pending"] + queue["blocked"]):
+            if any(hit in item for item in items):
                 return hit, True
         if explicit_hits:
-            return explicit_hits[0], False
+            # 活跃区没有它，但它可能是 `[-]` 待验收 / `[x]` 已归档的卡：
+            # 卡在磁盘上就照实返回（供提示词写「该卡不在活跃区」），不拿别人兜底。
+            return explicit_hits[0], (root / "flow" / "tasks" / f"{explicit_hits[0]}.md").is_file()
+    # 无显式点名时，才回退到「意图与条目文字是否有重叠」。
+    for item in items:
+        match = TICKET_IN_TITLE_RE.search(item.split("thread=")[0])
+        if match and text_overlap(intent, item):
+            return match.group(1), True
     # 收工交接的主战场：卡已转入 `[-]` 待验收、活跃区清空。此时仍必须能认出它
     # （2026-09-25 实测：只看活跃区 → 提示词永远写「未指定」，用户读成「没交接清楚」）。
     pending = queue["pending"]
@@ -527,8 +626,15 @@ def acceptance_of(project: Path | None, ticket: str) -> str:
     return _card_field(project, ticket, "acceptance")
 
 
-def handoff_fields(project: Path | None) -> dict[str, str]:
-    """顶部交接棒的结构化字段 + 来源会话 + 标题（接力提示词的「交接来源/任务说明/下一步」来源）。"""
+def handoff_fields(project: Path | None, ticket: str = "") -> dict[str, str]:
+    """交接棒的结构化字段 + 来源会话 + 标题（接力提示词的「交接来源/任务说明/下一步」来源）。
+
+    `ticket` 给出时**按 ticket 精确定位**：并发会话会往 `flow/进展.md` 顶部写自己的交接棒，
+    顶部那条常属于**另一张卡**（2026-09-25 实测：顶部是 A 卡、本轮要接 B 卡，于是提示词
+    写着「来源任务卡=B」「来源交接棒=A」「当前状态=A 的现状」——新会话拿着 B 卡读 A 卡的交接）。
+    找不到该 ticket 的交接棒就返回空字段，由调用方照实写「未声明」，绝不贴他卡内容。
+    未给 `ticket` 时保留旧的「顶部第一条」行为（无非特定卡调用方的兼容路径）。
+    """
     info = {"title": "", "thread": "", "现状": "", "还剩": "", "卡在哪": "", "下一步": "", "台账": ""}
     if project is None:
         return info
@@ -536,16 +642,19 @@ def handoff_fields(project: Path | None) -> dict[str, str]:
     if not progress.is_file():
         return info
     lines = progress.read_text(encoding="utf-8", errors="replace").splitlines()
-    start = next((i for i, line in enumerate(lines) if line.startswith(("## ", "### "))), None)
+    heads = [i for i, line in enumerate(lines) if line.startswith(("## ", "### "))]
+    if ticket:
+        # 只认标题里出现该 ticket 的那条；不确定就返回空，宁缺勿错。
+        heads = [i for i in heads if ticket in lines[i]]
+    start = heads[0] if heads else None
     if start is None:
         return info
     info["title"] = lines[start].strip()
     match = HANDOFF_THREAD_RE.search(lines[start])
     if match:
         info["thread"] = match.group(1).lower()
-    for line in lines[start + 1:]:
-        if line.startswith(("## ", "### ")):
-            break
+    stop = next((i for i in heads if i > start), len(lines))
+    for line in lines[start + 1:stop]:
         stripped = line.strip().lstrip("-* ").strip()
         for field in ("来源会话", "现状", "还剩", "卡在哪", "下一步", "台账"):
             if stripped.startswith(f"{field}：") or stripped.startswith(f"{field}:"):
@@ -605,7 +714,8 @@ def handoff_prompt(
         "（若当前 cwd 不是这个工作根，先 `cd` 过去再执行下一条；不要在别的 checkout 上开工）",
         "",
     ]
-    fields = handoff_fields(project)
+    # 交接棒的字段必须来自**本次要接的那张卡**：并发会话会把别人的交接棒顶到顶部。
+    fields = handoff_fields(project, resolved)
     source_thread = fields["thread"] or (str(report.get("thread_id") or "").strip())
     pending = pending_specs(project, resolved)
     if resolved and exists:
@@ -613,7 +723,7 @@ def handoff_prompt(
             "—— 交接来源 ——",
             f"来源会话：thread={source_thread or '（未声明）'}",
             f"来源任务卡：{resolved}",
-            f"来源交接棒：{fields['title'] or '（进展.md 顶部无交接棒）'}",
+            f"来源交接棒：{fields['title'] or f'（进展.md 未见 {resolved} 的交接棒）'}",
             f"台账：{root}/flow/specs/{resolved}.md（未回收 {len(pending)} 条）",
             "",
             "—— 任务说明 ——",
@@ -796,6 +906,9 @@ def main() -> int:
     reply = last_visible_reply(sessions)
     report["relay_prompt_in_reply"] = relay_prompt_visible(reply)
     report["board_in_reply"] = board_visible(reply)
+    # 「回复不可判定」：草稿被剥光后没有可读正文（那一轮的对外回复抓不到）。
+    # 此时**不能**判成「漏贴看板」——那是把观测量缺失当成了模型失职。
+    report["reply_readable"] = bool(strip_model_scratch(reply))
     prompt = handoff_prompt(
         args.intent or DEFAULT_INTENT,
         report,
@@ -897,9 +1010,16 @@ def main() -> int:
     # 没有回执时不判——还没交付过，谈不上漏贴。
     deliveries_dir = Path(args.project) / "flow" / DELIVERIES_DIR
     has_delivery = deliveries_dir.is_dir() and any(deliveries_dir.glob("*.json"))
-    if has_delivery and not report.get("board_in_reply"):
+    if has_delivery and not report.get("reply_readable"):
+        # 观测量缺失 ≠ 模型失职：只有模型草稿、拿不到正文时，照实说「无法判定」，
+        # 不点名、不阻塞（2026-09-26 总控会话实测：17K~33K 全是 <analysis>/<summary>）。
+        print("\nproject-flow 上轮回复无法判定（未取到可读正文）")
+        print("- 该 thread 最后一轮的对外回复只含模型草稿（<analysis>/<summary>），"
+              "无法据此判断看板有没有贴。")
+        print("- 这不代表漏贴：请以磁盘上的 `flow/看板.md` 与 `flow/deliveries/` 回执为准。")
+    elif has_delivery and not report.get("board_in_reply"):
         print("\nproject-flow 上轮回复缺失任务看板（本轮必须把三段原样贴出）")
-        print("- 判据：task_complete.last_agent_message 里必须同时出现「任务状态看板」与"
+        print("- 判据：该 thread 最后一轮的对外回复里必须同时出现「任务状态看板」与"
               "「当前聚焦待办」；只有回执落盘、回复里没贴，等于没交付。")
         print("- 收工时把 `flow-deliver.py` 输出的「任务状态看板 / 本轮工作汇报 / 交付验收卡」"
               "三段**原样**复制进回复；禁止只写摘要，禁止用 `| tail -N` 把三段截掉。")

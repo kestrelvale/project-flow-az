@@ -37,3 +37,6 @@ __pycache__/
 /.claude/
 /.codex/
 *.bak*
+
+# project-flow 运行态（认领记录含 thread_id/时间戳，不入库）
+flow/claims/

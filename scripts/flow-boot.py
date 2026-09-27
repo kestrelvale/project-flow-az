@@ -1537,6 +1537,13 @@ def main() -> int:
     handoff_problems.extend(distill_problems)
     if guard_problem:
         handoff_problems.append(guard_problem)
+    if "上轮回复无法判定" in budget_output:
+        # 草稿被剥光、拿不到可读正文时**不算漏贴**：只提示以磁盘为准，不进路由阻塞
+        # （2026-09-26 总控会话实测：last_agent_message 17K~33K 全是 <analysis>/<summary>）。
+        handoff_problems.append(
+            "上一轮对外回复未取到可读正文（只含模型草稿），看板是否贴出**无法判定**；"
+            "请以磁盘 `flow/看板.md` 与 `flow/deliveries/` 回执为准，不要据此认作漏贴。"
+        )
     if "上轮回复缺失任务看板" in budget_output:
         # 用户反馈（2026-09-25）：「现在的所有会话都不给我汇报…也不给我打印这个任务看板」。
         # 漏贴看板此前无机检；这条来自 flow-budget 的机检，放进路由阻塞，开工即点名。

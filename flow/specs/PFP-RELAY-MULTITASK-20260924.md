@@ -4,3 +4,4 @@
 - [x] SPE-2 | 卡不存在/已归档时不给死路径，改为列出 plan.md 活跃区候选 | 证据：tests/test-relay-multi-task.py（已归档卡 → 不出现 flow/tasks/<死卡>.md，改列活跃区候选）；tests/test-relay-clarity.py 同步收紧（未指定 ticket 时不再给占位符死路径）
 - [x] SPE-3 | 提示词附并行队列（[ ] 前 N 条）与阻塞项（[!]），并声明分端 worktree 与主仓合并分工 | 证据：tests/test-relay-multi-task.py（队列含 B/C 两张、出现阻塞提示与工作根/分工声明）
 - [x] SPE-4 | 破损修复：handoff_prompt 曾调用已被替换的 current_ticket（NameError） | 证据：重写后 tests/run-all.sh 21 项 Exit 0
+- [x] SPE-5 | 打回修复：意图显式点名拥有最高优先级，不被引用该编号的他卡兜底 | 证据：tests/test-relay-multi-task.py 打回断言③（点名 B、A 条目引用 B → 不得出现 tasks/A.md）；修复前实测返回 A
