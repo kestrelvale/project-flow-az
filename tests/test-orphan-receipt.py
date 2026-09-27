@@ -62,7 +62,7 @@ def build(root: Path) -> tuple[Path, Path]:
             [
                 "ticket_id: T1",
                 "objective: 修正登录失效",
-                "mode: execute",
+                "mode: plan",
                 "method: SDD,TDD,ATDD,BDD",
                 "scope: 输入=登录请求；输出=有效令牌；边界=不改密码策略",
                 "write_whitelist: src/auth.ts,tests/auth.test.ts",

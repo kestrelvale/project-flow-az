@@ -43,7 +43,7 @@ def main() -> None:
                 [
                     "ticket_id: T-2",
                     "goal: 实现登录",
-                    "mode: execute",
+                    "mode: review",
                     "method: SDD",
                     "scope: 登录输入输出边界",
                     "write_whitelist: src/auth.ts",
@@ -53,7 +53,10 @@ def main() -> None:
             encoding="utf-8",
         )
         errors = module.validate(card, "plan")
-        assert "plan 阶段 mode 必须为 plan" in errors, errors
+        # 未交付的卡（plan/execute 相位）不得自报 review/handoff —— 单向流转不得跳阶段。
+        # （旧断言「plan 阶段 mode 必须为 plan」已删除：它与 boot 的 mode 传参构成自证循环，
+        #   让门禁恒过；相位现由计划表分区位置推导，见 PFP-PHASE-GATE-TRUTH-20260927。）
+        assert any("单向流转不得跳阶段" in error for error in errors), errors
 
         # 兼容：旧卡用 objective 代替 goal 仍应放行。
         card.write_text(
@@ -77,7 +80,7 @@ def main() -> None:
             "\n".join(
                 [
                     "ticket_id: T-4",
-                    "mode: execute",
+                    "mode: plan",
                     "method: TDD",
                     "write_whitelist: src/auth.ts",
                     "verify_command: python3 tests/auth.py",

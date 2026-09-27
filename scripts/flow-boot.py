@@ -50,6 +50,10 @@ CARD_KEYS = (
     "next_action",
 )
 FOCUS_HEADING_MARKERS = ("当前聚焦", "当前任务", "施工队列")
+# `[-]` 待验收区堆积阈值：超过就阻塞新活，逼先清账。
+# 2026-09-27 实测：6 张卡堆在 `[-]`、`[ ]` 为空 → 每轮开工无焦点 → 只能去改框架，
+# 改完又新增 `[-]` 卡 → 下轮又被占满。这是「改了几十遍没变化」的机制本身。
+MAX_PENDING_CARDS = 3
 CLAIMS_DIR = "claims"
 CLAIM_TTL_HOURS = 12
 
@@ -202,6 +206,70 @@ def parse_plan_sections(plan: Path) -> list[tuple[str, list[tuple[str, str]]]]:
     if current_heading or current_tasks:
         sections.append((current_heading, current_tasks))
     return sections
+
+
+def phase_from_plan(project_root: Path, ticket: str) -> str:
+    """从计划表的分区位置推导**真实相位**，不信任卡自报的 `mode`。
+
+    缺陷（PFP-PHASE-GATE-TRUTH-20260927，2026-09-27 真机复现）：
+    旧实现用 `phase = mode`（卡自报）传给 flow-gate，而 flow-gate 又要求 `mode == phase`
+    → 两者恒等，门禁对任何自报 `mode: execute` 的卡**结构上不可能失败**。
+    实测：6 张卡全部 mode: execute，boot 一律打印「门禁通过 [execute]」。
+
+    真实相位由卡在 `flow/plan.md` 的位置决定（这与《任务状态机与按需加载SOP》一致）：
+        `[ ]` 活跃区        -> plan    （还没开工，先过 SDD）
+        `[-]` 待验收区      -> execute （实现期，要有 TDD 失败测试证据）
+        `[✓]`/history/      -> review  （已完结，受 ATDD 复核）
+    卡不在计划表任何区（幽灵卡）按 plan 判——最严的一档，逼它先补齐 SDD。
+    """
+    root = Path(project_root)
+    ticket_files = list((root / "flow" / "history" / "tasks").glob(f"{ticket}.md"))
+    if ticket_files:
+        return "review"
+    plan = root / "flow" / "plan.md"
+    if not plan.is_file():
+        return "plan"
+    # 卡文件名常是 `<ticket>-<slug>`（如 T1-login），而计划表里记的是 ticket_id（T1）。
+    # 因此除文件名外，还要拿卡里的 ticket_id 一起匹配。
+    aliases = {ticket}
+    card_file = root / "flow" / "tasks" / f"{ticket}.md"
+    if card_file.is_file():
+        ticket_id = read_card(card_file).get("ticket_id", "").strip()
+        if ticket_id:
+            aliases.add(ticket_id)
+    for heading, tasks in parse_plan_sections(plan):
+        for state, title in tasks:
+            if not any(alias and alias in title for alias in aliases):
+                continue
+            if state in {"✓", "x", "X"}:
+                return "review"
+            if state == "-":
+                return "execute"
+            return "plan"
+    return "plan"
+
+
+def pending_blackhole(project_root: Path) -> tuple[bool, str]:
+    """`[ ]` 为空且 `[-]` 堆积到阈值 → 阻塞新活，逼先清账。
+
+    缺陷（PFP-PENDING-BLACKHOLE-20260927，2026-09-27 真机复现）：6 张卡堆在 `[-]`、
+    `[ ]` 为空 → 每轮开工「本轮尚未登记原子任务」→ 只能去改框架；改完又新增 `[-]` 卡
+    → 下轮活跃区又被占满。这是「改了几十遍没变化」的**机制本身**，不是纪律问题。
+
+    有 `[ ]` 活跃焦点时不阻塞：否则永远开不了新活。阈值以下不阻塞：避免刚交付一张就被拦。
+    """
+    plan = Path(project_root) / "flow" / "plan.md"
+    if not plan.is_file():
+        return False, ""
+    active = read_active_tasks(plan)
+    pending = read_pending_tasks(plan)
+    if active or len(pending) <= MAX_PENDING_CARDS:
+        return False, ""
+    return True, (
+        f"`[-]` 待验收已堆 {len(pending)} 张（阈值 {MAX_PENDING_CARDS}）而 `[ ]` 活跃区为空："
+        f"先逐张清账归档（`flow-gc.py . --apply --task-archive <ticket> --reason user_accepted`），"
+        f"否则新活开了也会被这堆卡淹没——这正是活动区反复被占满的根因。"
+    )
 
 
 def read_active_tasks(plan: Path) -> list[tuple[str, str]]:
@@ -1132,6 +1200,8 @@ def route_hint(
         for path, card in cards
         if card.get("mode") == "execute" and card_is_linked(card, active_tasks)
     ]
+    # 路由按「本卡要做什么」分（mode），门禁按「卡走到哪一步」判（计划表分区位置）。
+    # 两者是不同的轴：`[ ]` 里的卡既可能在做 plan 拆解，也可能在做实现。
     handoff_cards = [(path, card) for path, card in cards if card.get("mode") == "handoff"]
     review_cards = [(path, card) for path, card in cards if card.get("mode") == "review"]
     hints: list[str] = []
@@ -1225,6 +1295,7 @@ def render_start_status(
     delivery_reports: list[str],
     stop_reports: list[str],
     soft_blocked: bool = False,
+    project_root: Path | None = None,
 ) -> list[str]:
     status = ["### project-flow 开工状态", "", "## 🎯 当前聚焦待办 (P0)"]
     pending = [(state, title) for state, title in active_tasks if state in {" ", "✕", "x", "X"}]
@@ -1235,6 +1306,12 @@ def render_start_status(
         status.append("- [ ] 本轮尚未登记原子任务")
 
     status.extend(["", "## 🚧 路由阻塞"])
+    # `[-]` 黑洞：`[ ]` 为空且待验收堆积 → 必须先清账，否则新活开了也立刻被淹没。
+    blackhole, blackhole_reason = (
+        pending_blackhole(project_root) if project_root else (False, "")
+    )
+    if blackhole:
+        status.append(f"- {blackhole_reason}")
     blockers = [
         title
         for _, title in active_tasks
@@ -1265,6 +1342,8 @@ def render_start_status(
     if handoff_problems:
         status.extend(f"- {report}" for report in handoff_problems)
     if (
+        not blackhole
+        and
         not blockers
         and not parallel_conflicts
         and not dependency_blockers
@@ -1479,8 +1558,9 @@ def main() -> int:
                 continue
             values = read_card(card)
             cards.append((card, values))
-            mode = values.get("mode", "plan")
-            phase = mode if mode in {"plan", "execute", "review", "handoff"} else "plan"
+            # 真实相位取自计划表分区位置，不信任卡自报的 mode：
+            # 拿 mode 当 phase 会让 flow-gate 的 `mode == phase` 校验恒真（自证循环）。
+            phase = phase_from_plan(project_root, card.stem)
             gate = subprocess.run(
                 [sys.executable, str(GATE_SCRIPT), str(card), "--phase", phase],
                 text=True,
@@ -1537,6 +1617,7 @@ def main() -> int:
     handoff_problems.extend(distill_problems)
     if guard_problem:
         handoff_problems.append(guard_problem)
+    board_blocker = ""
     if "上轮回复无法判定" in budget_output:
         # 草稿被剥光、拿不到可读正文时**不算漏贴**：只提示以磁盘为准，不进路由阻塞
         # （2026-09-26 总控会话实测：last_agent_message 17K~33K 全是 <analysis>/<summary>）。
@@ -1547,11 +1628,16 @@ def main() -> int:
     if "上轮回复缺失任务看板" in budget_output:
         # 用户反馈（2026-09-25）：「现在的所有会话都不给我汇报…也不给我打印这个任务看板」。
         # 漏贴看板此前无机检；这条来自 flow-budget 的机检，放进路由阻塞，开工即点名。
-        handoff_problems.append(
+        # 2026-09-27 升级：只「点名」会被忽略（实测脚本跑了、回执落盘、回复里 0 次看板），
+        # 因此单独记进 board_blocker，用于**阻断认领**——必须先补看板才能登记新意图。
+        board_blocker = (
             "上一轮交付没有把收工看板贴进回复：回执落盘 ≠ 交付。本轮收工必须把"
             "`flow-deliver.py` 输出的「任务状态看板 / 本轮工作汇报 / 交付验收卡」三段"
             "原样复制到回复里；禁止只写摘要，禁止用 `| tail -N` 截掉三段。"
         )
+        handoff_problems.append(board_blocker)
+    else:
+        board_blocker = ""
     if "上轮回复缺失接力提示词" in budget_output:
         # 用户反馈：「应该在对话框上打印出交接提示词再结束，而不是直接熔断」。
         # 这条来自 flow-budget 的机检；放到路由阻塞里，模型开工就被点名。
@@ -1560,9 +1646,11 @@ def main() -> int:
             "「project-flow 接力提示词」原样复制到回复里，再结束本轮；只写「已熔断」不算交接。"
         )
     delivery_reports = audit_deliveries(project_root / "flow", pending_tasks)
+    # 漏贴看板升级为硬阻塞：先补看板，才允许认领新卡。
+    # 只「点名」会被忽略（2026-09-27 实测：脚本跑了、回执落盘、回复里 0 次看板）。
     claim_reports = (
         []
-        if soft_blocked
+        if soft_blocked or board_blocker
         else claim_active_tasks(
             project_root / "flow",
             cards,
@@ -1572,6 +1660,8 @@ def main() -> int:
             dependency_blockers,
         )
     )
+    if board_blocker and not soft_blocked:
+        claim_reports.insert(0, "【硬阻塞】上轮漏贴看板：本轮不得认领新卡，先补齐看板三段再开工。")
     print(
         "\n".join(
             render_start_status(
@@ -1590,6 +1680,7 @@ def main() -> int:
                 delivery_reports,
                 stop_reports,
                 soft_blocked,
+                project_root,
             )
         )
     )

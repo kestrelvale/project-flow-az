@@ -47,6 +47,8 @@ def main() -> None:
                 [
                     "ticket_id: P0-1",
                     "objective: 修正登录失效",
+                    # P0-1 期望走 Execute 路由 → 卡必须是实现卡（mode: execute）。
+                    # 相位由计划表分区位置推导，与 mode 是两个轴（PFP-PHASE-GATE-TRUTH-20260927）。
                     "mode: execute",
                     "method: SDD,TDD,ATDD,BDD",
                     "scope: 输入=登录请求；输出=有效令牌；失败态=拒绝无效请求",
@@ -212,7 +214,7 @@ def main() -> None:
                 [
                     "ticket_id: P0-8",
                     "goal: 调整鉴权中间件",
-                    "mode: execute",
+                    "mode: plan",
                     "method: TDD",
                     "write_whitelist: src/auth.ts,tests/auth.test.ts",
                     "verify_command: npm test -- auth",
@@ -280,7 +282,7 @@ def main() -> None:
                 [
                     "ticket_id: P0-9",
                     "goal: 依赖前置的任务",
-                    "mode: execute",
+                    "mode: plan",
                     "method: TDD",
                     "depends_on: P0-NOT-DONE",
                     "write_whitelist: src/dep.ts",
@@ -387,7 +389,7 @@ def main() -> None:
                 [
                     "ticket_id: P0-39",
                     "goal: 账号角色权限修复",
-                    "mode: execute",
+                    "mode: plan",
                     "method: TDD",
                     "scope: |",
                     "  输出：",

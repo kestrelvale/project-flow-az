@@ -249,10 +249,16 @@ def validate(path: Path, phase: str) -> list[str]:
             errors.append(f"字段仍为占位符: {field}")
     mode = values.get("mode", "")
     methods = {item.strip().upper() for item in values.get("method", "").replace("->", ",").split(",") if item.strip()}
-    if phase == "plan" and mode != "plan":
-        errors.append("plan 阶段 mode 必须为 plan")
-    if phase == "execute" and mode != "execute":
-        errors.append("execute 阶段 mode 必须为 execute")
+    # 相位（卡走到哪一步，由计划表分区位置推导）与 mode（这张卡要做什么）是**两个轴**：
+    # `[ ]` 未交付区里的卡既可能在做 plan 拆解，也可能在做实现，因此不复述「mode 必须等于相位」。
+    # 旧写法 `phase == "plan" and mode != "plan"` 是自证循环的一半：boot 拿 mode 当 phase 传进来，
+    # 这里再要求两者相等 → 恒真，门禁永远通过（2026-09-27 实测 6 张卡全部误报通过）。
+    # 真正该守的是**单向流转**：已交付的卡不得回退到 plan/execute 相位重做。
+    if phase in {"plan", "execute"} and mode in {"review", "handoff"}:
+        errors.append(
+            f"卡尚未交付，却自报 mode={mode}（复核/收尾）；"
+            f"未交付的卡只能是 plan 或 execute，单向流转不得跳阶段"
+        )
     if phase == "handoff" and not values.get("next_agent", "").lower().startswith("codex"):
         errors.append("handoff 阶段 next_agent 必须明确交给 Codex")
     required_method = PHASE_METHOD[phase]

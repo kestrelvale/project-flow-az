@@ -207,6 +207,9 @@ def main() -> None:
             ),
             encoding="utf-8",
         )
+        # 解除阻塞后必须能继续施工。相位自 2026-09-27 起由**计划表分区位置**推导
+        # （PFP-PHASE-GATE-TRUTH-20260927），不再是卡自报的 mode；卡在 `[ ]` 活跃区
+        # 就是实现期的起点，必须报出 Execute 路由（而不是把卡误报成 plan 相位后卡死）。
         released = boot(root)
         assert "【柔性阻塞】" not in released.stdout, released.stdout
         assert "Execute 路由" in released.stdout, released.stdout

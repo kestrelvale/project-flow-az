@@ -24,7 +24,7 @@ def main() -> None:
                 [
                     "ticket_id: T-1",
                     "objective: 修正登录失效",
-                    "mode: execute",
+                    "mode: plan",
                     "method: SDD,TDD,ATDD,BDD",
                     "write_whitelist: src/auth.ts,tests/auth.test.ts",
                     "verify_command: npm test -- auth",
@@ -115,7 +115,7 @@ def main() -> None:
                 [
                     "ticket_id: T-1",
                     "goal: 修正登录失效",
-                    "mode: execute",
+                    "mode: plan",
                     "method: TDD",
                     "write_whitelist: src/auth.ts",
                     "verify_command: npm test -- auth",
@@ -164,7 +164,7 @@ def main() -> None:
                 [
                     "ticket_id: T-9",
                     "objective: 落盘回执",
-                    "mode: execute",
+                    "mode: plan",
                     "method: TDD",
                     "write_whitelist: src/auth.ts",
                     "verify_command: npm test -- auth",
