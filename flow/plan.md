@@ -33,7 +33,7 @@
   验证：`python3 tests/test-report-visibility.py` + `bash tests/run-all.sh`（全绿）+ 篡改验证必红。
 
 ## ⏳ 待人工验收 (Pending Verification)
-- 无
+- [-] PFP-SPEC-ACCUMULATION-20260928 【框架修复·已交付】规格点不再跨任务累积：按卡加载 + 随卡归档 + 首屏只显示本卡
 
 > 2026-09-27 归档记录（用户指令「帮我完成 A」）：
 > 5 张卡（PFP-BOARD-MARKERS / PFP-DELIVERY-PIPE / PFP-RELAY-IDENTITY /

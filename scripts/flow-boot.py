@@ -737,7 +737,9 @@ def render_stop_reports(
     return reports
 
 
-def run_distill_checks(project_root: Path, thread_id: str) -> tuple[list[str], list[str]]:
+def run_distill_checks(
+    project_root: Path, thread_id: str, ticket: str = ""
+) -> tuple[list[str], list[str]]:
     """跑 flow-distill 的两道校验，返回（问题, 规格点回收提示）。
 
     问题会被并进路由阻塞；提示给新会话当唯一待办源——已完成规格点不得重跑，
@@ -745,8 +747,24 @@ def run_distill_checks(project_root: Path, thread_id: str) -> tuple[list[str], l
     """
     if not DISTILL_SCRIPT.is_file():
         return [], []
+    # 必须**按 ticket 限定**：不传 --ticket 时 flow-distill 会 glob 整个
+    # `flow/specs/` 目录，把历史（含已归档卡）台账一并读出。
+    # 2026-09-28 实测：12 张台账共 49 条规格点（其中 9 张卡早已归档、0 条未回收），
+    # 前 25 行被塞进**每个会话的首屏**——用户看到的「规格点挂了很多」正是此故。
+    # 用户口径：规格点是 plan 的子任务，做完就不该再出现在下轮；没做完才继续加载。
+    if not ticket:
+        # 定不出本轮要接的卡时**不加载台账**，只提示去 SDD 登记。
+        # 不限定 ticket 时 flow-distill 会 glob 整个 flow/specs/，把历史卡
+        # （含已归档）的规格点一并倒进首屏——这正是「规格点挂了很多」的来源。
+        return [], [
+            "### project-flow 规格点回收（续跑唯一待办源）",
+            "- 本轮未绑定任务卡：不加载任何台账，避免历史规格点污染首屏。",
+            "- 先按 SDD 在 `flow/plan.md` 登记 `[ ]` 原子任务并建卡，"
+            "下一轮开工才会加载本卡台账。",
+        ]
     spec = subprocess.run(
-        [sys.executable, str(DISTILL_SCRIPT), "spec", "--project", str(project_root)],
+        [sys.executable, str(DISTILL_SCRIPT), "spec", "--project", str(project_root),
+         "--ticket", ticket],
         text=True,
         capture_output=True,
     )
@@ -1430,6 +1448,32 @@ def render_start_status(
     return status
 
 
+def current_ticket(
+    intent: str,
+    active_tasks: list[tuple[str, str]],
+    cards: list[tuple[Path, dict[str, str]]],
+) -> str:
+    """本轮要接的那张卡的编号；定不出就不猜（返回空串）。
+
+    用于把 `flow-distill spec` 限定到本卡——不限定会扫整个 `flow/specs/`，
+    把历史（含已归档卡）台账一并加载（2026-09-28 实测 12 张 / 49 条）。
+    """
+    # 意图里显式点名优先。
+    if intent:
+        for hit in re.findall(r"([A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*-\d+)", intent):
+            if any(hit in (card.get("ticket_id", "") or path.stem)
+                   for path, card in cards):
+                return hit
+    # 否则取活跃区里唯一绑定的那张卡。
+    linked = [
+        (card.get("ticket_id", "") or path.stem)
+        for path, card in cards
+        if card_is_linked(card, active_tasks)
+    ]
+    linked = [t for t in dict.fromkeys(linked) if t]
+    return linked[0] if len(linked) == 1 else ""
+
+
 def intent_matches(
     intent: str,
     active_tasks: list[tuple[str, str]],
@@ -1610,7 +1654,11 @@ def main() -> int:
             displaced_note = displaced_handoff_note(flow_dir, thread_id, owner)
     guard_problem = read_guard_staleness(flow_dir, budget_output)
     soft_blocked = bool(stop_reports) or bool(guard_problem)
-    distill_problems, distill_notes = run_distill_checks(project_root, thread_id)
+    # 按本次要接的卡限定台账加载范围：规格点是 plan 的子任务，
+    # 做完的不该再出现在下轮（用户 2026-09-28 口径）。
+    distill_problems, distill_notes = run_distill_checks(
+        project_root, thread_id, current_ticket(args.intent, active_tasks, cards)
+    )
     handoff_problems = check_handoff_schema(
         flow_dir, progress_has_stop(flow_dir) or bool(stop_reports)
     )

@@ -16,7 +16,10 @@ MAX_PROGRESS_ENTRIES = 5
 # 阈值按“开工可承受”设定，而不是按条数。
 MAX_PROGRESS_BYTES = 12_000
 KEEP_PROGRESS_BYTES = 6_000
-HISTORY_DIRS = ("plans", "tasks", "progress")
+# `specs` 必须在内：规格点台账是任务卡的附庸，卡归档时台账必须跟着走。
+# 2026-09-28 实测：漏了这一项 → 12 张台账里 9 张的主卡早已归档、台账却原地滞留
+# （且 0 条未回收），被下轮会话全量加载，用户看到「规格点挂了很多」。
+HISTORY_DIRS = ("plans", "tasks", "specs", "progress")
 TRASH_DIRS = ("deprecated", "verification")
 
 
@@ -162,6 +165,13 @@ def archive_task(
     if apply:
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(source), str(destination))
+        # 台账随卡归档：卡走了，规格点台账不得原地滞留（2026-09-28 实测 9/12 张孤儿）。
+        ledger = flow / "specs" / f"{ticket}.md"
+        if ledger.is_file():
+            ledger_dest = flow / "history" / "specs" / f"{ticket}.md"
+            ledger_dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(ledger), str(ledger_dest))
+            result["ledger"] = f"{ledger.relative_to(root)} -> {ledger_dest.relative_to(root)}"
         receipt_dir = flow / "gc" / "receipts"
         receipt_dir.mkdir(parents=True, exist_ok=True)
         receipt = receipt_dir / f"{datetime.now():%Y%m%d-%H%M%S}-{ticket}.json"
